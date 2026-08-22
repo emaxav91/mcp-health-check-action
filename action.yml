@@ -16,8 +16,11 @@ inputs:
 
 outputs:
   score:
-    description: "Score de conformité obtenu (%)"
+    description: "Score de conformité NIST AI RMF obtenu (%)"
     value: ${{ steps.run-check.outputs.score }}
+  axiom_score:
+    description: "Score de signaux techniques AXIOM (Domaine 5, %)"
+    value: ${{ steps.run-check.outputs.axiom_score }}
   passed:
     description: "true/false selon que le score dépasse min-score"
     value: ${{ steps.run-check.outputs.passed }}

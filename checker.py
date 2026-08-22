@@ -47,6 +47,11 @@ async def run_health_check(server_command: list[str]) -> dict:
         "server_name": None,
         "tools_count": 0,
         "resources_count": 0,
+        "resources_detail": [],
+        "server_instructions": None,
+        "capabilities": {},
+        "consistent_tool_listing": None,
+        "risky_tool_names": [],
         "issues": [],
         "tools_detail": [],
     }
@@ -77,9 +82,44 @@ async def run_health_check(server_command: list[str]) -> dict:
                 try:
                     resources_result = await session.list_resources()
                     result["resources_count"] = len(resources_result.resources)
+                    result["resources_detail"] = [
+                        {
+                            "name": r.name,
+                            "has_description": bool(r.description and len(r.description.strip()) > 0),
+                            "has_mime_type": bool(r.mime_type),
+                        }
+                        for r in resources_result.resources
+                    ]
                 except Exception:
                     # Certains serveurs ne supportent pas les resources, c'est normal
-                    pass
+                    result["resources_detail"] = []
+
+                result["server_instructions"] = init_result.instructions
+
+                # --- Capacités déclarées (utile pour proxy "Sécurité et audit") ---
+                caps = init_result.capabilities
+                result["capabilities"] = {
+                    "logging": bool(caps.logging),
+                    "experimental": bool(caps.experimental),
+                }
+
+                # --- Contrôle de cohérence (proxy "Fiabilité") ---
+                # Deux appels list_tools() consécutifs doivent renvoyer la
+                # même liste — une incohérence est un signe d'instabilité.
+                tools_result_2 = await session.list_tools()
+                names_1 = sorted(t.name for t in tools_result.tools)
+                names_2 = sorted(t.name for t in tools_result_2.tools)
+                result["consistent_tool_listing"] = (names_1 == names_2)
+
+                # --- Détection de mots-clés à risque (proxy "Sécurité et audit") ---
+                # Pas un scan de sécurité réel — juste un signal d'alerte
+                # basique sur des noms d'outils à fort impact potentiel.
+                RISKY_KEYWORDS = ["execute", "eval", "shell", "delete_all", "drop_", "sudo", "exec_"]
+                risky_tools = [
+                    t.name for t in tools_result.tools
+                    if any(k in t.name.lower() for k in RISKY_KEYWORDS)
+                ]
+                result["risky_tool_names"] = risky_tools
 
     except Exception as e:
         result["issues"].append(f"ÉCHEC DE CONNEXION : {e}")

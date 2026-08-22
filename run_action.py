@@ -14,6 +14,7 @@ import sys
 
 from checker import run_health_check, print_report
 from nist_score import compute_nist_aligned_score, print_score_report
+from axiom_score import compute_axiom_technical_score, print_axiom_report
 
 
 def write_github_output(name: str, value: str):
@@ -52,6 +53,10 @@ def main():
 
     score = compute_nist_aligned_score(result)
     print_score_report(score)
+
+    axiom = compute_axiom_technical_score(result)
+    print_axiom_report(axiom)
+    write_github_output("axiom_score", str(axiom.percentage))
 
     write_github_output("reachable", "true")
     write_github_output("score", str(score.percentage))

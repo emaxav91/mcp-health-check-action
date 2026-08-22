@@ -1,4 +1,4 @@
-# Mise en prod — GitHub Action MCP Health Check
+# Mise en prod — MCP Trust Score
 
 ## ✅ Ce qui est réellement testé (pas juste écrit)
 
@@ -22,7 +22,7 @@ en conditions réelles, à l'étape 4 ci-dessous.
 ## Étapes pour publier, dans l'ordre
 
 ### 1. Crée un repo GitHub dédié
-Nomme-le clairement, ex: `mcp-health-check-action`. Mets tous les fichiers
+Nomme-le clairement, ex: `mcp-trust-score`. Mets tous les fichiers
 de ce dossier à la racine du repo :
 ```
 action.yml
@@ -40,7 +40,7 @@ GitHub Actions se référence par tag, pas par nom de branche :
 ```bash
 git init
 git add .
-git commit -m "v1.0 - MCP Health Check Action"
+git commit -m "v1.0 - MCP Trust Score"
 git tag -a v1 -m "Version 1"
 git push origin main --tags
 ```
@@ -49,7 +49,7 @@ git push origin main --tags
 Crée un second repo de test avec `test_server.py` dedans, ajoute
 `.github/workflows/test.yml` (copie `action-package/example-workflow.yml`,
 en remplaçant `TON-PSEUDO/mcp-health-check@v1` par le chemin de ton repo,
-ex: `./` si tu testes dans le même repo, ou `TON-PSEUDO/mcp-health-check-action@v1`
+ex: `./` si tu testes dans le même repo, ou `TON-PSEUDO/mcp-trust-score@v1`
 une fois publié). Vérifie dans l'onglet "Actions" de GitHub que le job
 tourne et affiche bien le rapport.
 
@@ -76,6 +76,6 @@ l'ajoute au workflow qu'après l'avoir validé indépendamment.
 
 - Ajoute un badge dans le README des repos qui l'utilisent (GitHub génère
   automatiquement le markdown du badge sur la page Marketplace)
-- Poste sur les mêmes canaux qu'on avait identifiés plus tôt (r/LocalLLaMA,
+- Poste sur les mêmes canaux pertinents pour la communauté MCP (r/LocalLLaMA,
   Discord MCP/Anthropic, Indie Hackers) — cette fois avec un lien concret
   vers une Action utilisable, pas juste une idée à valider
