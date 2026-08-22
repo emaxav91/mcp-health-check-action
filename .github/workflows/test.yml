@@ -1,0 +1,22 @@
+name: MCP Health Check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  mcp-health-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install my MCP server dependencies
+        run: pip install -r requirements.txt   # adapte à ton projet
+
+      - name: Vérifier la conformité MCP
+        uses: ./
+        with:
+          server-command: 'python3 my_server.py'   # remplace par ta vraie commande
+          min-score: '70'   # ajuste le seuil selon ton exigence
