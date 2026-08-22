@@ -13,14 +13,21 @@ inputs:
     description: "Score minimum requis (%) pour que le job réussisse"
     required: false
     default: '70'
+  enable-blockchain-anchor:
+    description: "Ancre un hash du rapport sur OpenTimestamps (Bitcoin). Ajoute un appel réseau externe, désactivé par défaut."
+    required: false
+    default: 'false'
 
 outputs:
   score:
     description: "Score de conformité NIST AI RMF obtenu (%)"
     value: ${{ steps.run-check.outputs.score }}
   axiom_score:
-    description: "Score de signaux techniques AXIOM (Domaine 5, %)"
+    description: "Score de signaux techniques AXIOM (Domaines 4 et 5, %)"
     value: ${{ steps.run-check.outputs.axiom_score }}
+  blockchain_proof:
+    description: "Chemin du fichier de preuve OpenTimestamps (.ots), vide si non activé ou échec"
+    value: ${{ steps.run-check.outputs.blockchain_proof }}
   passed:
     description: "true/false selon que le score dépasse min-score"
     value: ${{ steps.run-check.outputs.passed }}
@@ -38,7 +45,7 @@ runs:
 
     - name: Install dependencies
       shell: bash
-      run: pip install mcp
+      run: pip install mcp opentimestamps-client
 
     - name: Run MCP Health Check
       id: run-check
@@ -47,3 +54,4 @@ runs:
       env:
         INPUT_SERVER-COMMAND: ${{ inputs.server-command }}
         INPUT_MIN-SCORE: ${{ inputs.min-score }}
+        INPUT_ENABLE-BLOCKCHAIN-ANCHOR: ${{ inputs.enable-blockchain-anchor }}

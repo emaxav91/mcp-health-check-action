@@ -9,12 +9,14 @@ les outils concurrents trouvés sur le Marketplace (fail-on-critical).
 """
 
 import asyncio
+import json
 import os
 import sys
 
 from checker import run_health_check, print_report
 from nist_score import compute_nist_aligned_score, print_score_report
 from axiom_score import compute_axiom_technical_score, print_axiom_report
+from blockchain_anchor import compute_report_hash, create_opentimestamps_proof
 
 
 def write_github_output(name: str, value: str):
@@ -57,6 +59,38 @@ def main():
     axiom = compute_axiom_technical_score(result)
     print_axiom_report(axiom)
     write_github_output("axiom_score", str(axiom.percentage))
+
+    # --- Ancrage blockchain (optionnel, désactivé par défaut) ---
+    # Coche 'enable-blockchain-anchor: true' dans le workflow pour l'activer.
+    # Désactivé par défaut car ça ajoute un appel réseau externe (serveurs
+    # de calendrier OpenTimestamps) qui peut ralentir ou échouer selon le
+    # réseau du runner CI — ne doit pas bloquer le job gratuit par défaut.
+    enable_anchor = os.environ.get("INPUT_ENABLE-BLOCKCHAIN-ANCHOR", "false").lower() == "true"
+    if enable_anchor:
+        print("\n🔗 Ancrage blockchain (OpenTimestamps) activé...")
+        report_summary = {
+            "server_name": result.get("server_name"),
+            "checked_at": result.get("checked_at"),
+            "nist_score": score.percentage,
+            "axiom_score": axiom.percentage,
+        }
+        report_hash = compute_report_hash(report_summary)
+        print(f"   Hash du rapport : {report_hash}")
+
+        report_path = "mcp_trust_report.json"
+        with open(report_path, "w") as f:
+            json.dump(report_summary, f, indent=2)
+
+        try:
+            proof_path = create_opentimestamps_proof(report_path)
+            print(f"   ✅ Preuve créée : {proof_path}")
+            write_github_output("blockchain_proof", proof_path)
+            write_github_output("report_hash", report_hash)
+        except Exception as e:
+            # L'ancrage est une fonctionnalité optionnelle : un échec ici
+            # ne doit JAMAIS faire échouer le job principal.
+            print(f"   ⚠️  Ancrage échoué (non bloquant) : {e}")
+            write_github_output("blockchain_proof", "")
 
     write_github_output("reachable", "true")
     write_github_output("score", str(score.percentage))

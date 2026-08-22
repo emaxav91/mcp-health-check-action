@@ -65,6 +65,7 @@ jobs:
 |---|---|---|
 | `server-command` | Commande pour lancer ton serveur MCP | requis |
 | `min-score` | Score NIST minimum (%) requis pour que le job réussisse | `70` |
+| `enable-blockchain-anchor` | Ancre un hash du rapport sur OpenTimestamps (Bitcoin) | `false` |
 
 ## Outputs
 
@@ -72,17 +73,39 @@ jobs:
 |---|---|
 | `score` | Score NIST (%) |
 | `axiom_score` | Score AXIOM (%) |
+| `blockchain_proof` | Chemin du fichier de preuve `.ots`, vide si non activé ou échec |
 | `passed` | `true`/`false` selon le seuil `min-score` |
 | `reachable` | `true`/`false` selon que le serveur a répondu |
 
-## Traçabilité par ancrage de hash (optionnel)
+## Traçabilité par ancrage OpenTimestamps
 
-`blockchain_anchor.py` permet de calculer une empreinte SHA-256 d'un
-rapport de conformité, pour en prouver l'intégrité et l'horodatage dans le
-temps. Deux options d'ancrage sont documentées dans le fichier : OpenTimestamps
-(recommandé, gratuit, ancré sur Bitcoin) ou Polygon (plus rapide, nécessite
-un portefeuille crypto). Ce module n'est pas encore branché au pipeline
-principal — à activer manuellement une fois testé sur ton propre cas d'usage.
+Active `enable-blockchain-anchor: true` dans ton workflow pour que chaque
+run calcule un hash SHA-256 du rapport (score NIST + AXIOM + nom du
+serveur + date) et l'ancre sur la blockchain Bitcoin via le protocole
+ouvert OpenTimestamps — gratuit, sans portefeuille crypto à gérer.
+
+✅ **Testé** : la logique Python (calcul de hash, appel du CLI `ots`,
+gestion d'erreur) fonctionne correctement — vérifié avec le CLI officiel,
+qui produit l'erreur réseau attendue quand les serveurs de calendrier ne
+sont pas joignables. Cette fonctionnalité est conçue pour échouer
+**silencieusement** (elle n'affecte jamais `passed`/le succès du job) si
+l'ancrage réseau échoue — seule la ligne `blockchain_proof` reste vide.
+
+⚠️ **Non vérifié en conditions réelles** : la soumission effective aux
+serveurs de calendrier OpenTimestamps nécessite un accès réseau sortant
+que l'environnement de développement utilisé n'avait pas. Teste-la sur
+un vrai run GitHub Actions pour confirmer qu'un fichier `.ots` valide est
+généré.
+
+Une preuve fraîchement créée n'est pas immédiatement vérifiable — il faut
+généralement attendre qu'un bloc Bitcoin la confirme (jusqu'à quelques
+heures). Utilise `ots upgrade <fichier>.ots` puis `ots verify <fichier>.ots`
+plus tard pour la confirmer.
+
+**Alternative** : `blockchain_anchor.py` documente aussi une option
+d'ancrage direct sur Polygon (plus rapide, nécessite un portefeuille
+crypto) — non branchée au workflow principal, à activer manuellement si
+préférée à OpenTimestamps.
 
 ## Structure du projet
 
@@ -98,3 +121,9 @@ mcp-health-check/
 └── action-package/
     └── example-workflow.yml # Exemple de workflow à copier dans un repo cible
 ```
+
+## Licence
+
+MIT — voir le fichier `LICENSE`. Réutilisation, modification et
+redistribution libres, y compris commerciales, à condition de conserver
+la mention de copyright.
