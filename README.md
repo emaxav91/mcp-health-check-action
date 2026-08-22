@@ -80,3 +80,45 @@ python3 checker.py python3 test_server.py
    conformité se dégrade après une mise à jour
 4. **Modèle freemium** : check ponctuel gratuit, surveillance continue en
    payant — même structure que les projets précédents
+
+## Score d'auto-évaluation NIST AI RMF (`nist_score.py`)
+
+⚠️ **Important, à ne jamais oublier dans le marketing du produit** : il
+n'existe pas encore de certification NIST officielle pour MCP (l'initiative
+de standards agents IA du NIST a été lancée en février 2026, profil complet
+attendu au T4 2026). Ce module produit un **score d'auto-évaluation inspiré
+des 4 fonctions du NIST AI RMF** (Govern, Map, Measure, Manage), jamais à
+présenter comme "certifié NIST" — utilise plutôt "auto-évaluation alignée
+sur le NIST AI RMF".
+
+✅ **Testé réellement** : le script a tourné sur le vrai résultat du checker
+(pas des données inventées) — score de 71,4% obtenu, avec le détail correct
+par fonction (Govern 100%, Map 50%, Measure 50%, Manage 100%), cohérent
+avec le seul problème détecté (description vide sur un outil).
+
+```bash
+python3 checker.py python3 test_server.py   # génère last_check.json
+python3 -c "
+import json, nist_score
+with open('last_check.json') as f:
+    result = json.load(f)
+score = nist_score.compute_nist_aligned_score(result)
+nist_score.print_score_report(score)
+"
+```
+
+## Traçabilité par ancrage blockchain (`blockchain_anchor.py`)
+
+Deux options documentées, avec un choix honnête à faire :
+
+- **OpenTimestamps (recommandé)** : gratuit, ancre le hash sur Bitcoin,
+  pas de portefeuille crypto requis. Squelette de code fourni, mais
+  l'intégration complète nécessite un test avec accès réseau réel — à
+  faire chez toi avec la CLI officielle `ots stamp` d'abord.
+- **Polygon direct** : plus rapide, coûte des fractions de centime, mais
+  demande un portefeuille crypto — plus de friction pour un client non-initié.
+
+✅ **Ce qui est testé** : le calcul de hash SHA-256 du rapport (déterministe,
+vérifié). C'est la seule partie testable sans réseau — le reste (soumission
+aux calendriers OpenTimestamps, transaction Polygon) nécessite un vrai
+réseau et n'a pas pu être vérifié dans mon environnement de dev.

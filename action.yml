@@ -1,0 +1,46 @@
+name: 'MCP Health Check'
+description: 'Vérifie la conformité de votre serveur MCP et calcule un score aligné sur le NIST AI RMF, avant que vos utilisateurs ne le découvrent eux-mêmes.'
+author: 'Toi'
+branding:
+  icon: 'shield'
+  color: 'blue'
+
+inputs:
+  server-command:
+    description: "Commande pour lancer votre serveur MCP (ex: 'python3 my_server.py')"
+    required: true
+  min-score:
+    description: "Score minimum requis (%) pour que le job réussisse"
+    required: false
+    default: '70'
+
+outputs:
+  score:
+    description: "Score de conformité obtenu (%)"
+    value: ${{ steps.run-check.outputs.score }}
+  passed:
+    description: "true/false selon que le score dépasse min-score"
+    value: ${{ steps.run-check.outputs.passed }}
+  reachable:
+    description: "true/false selon que le serveur a répondu"
+    value: ${{ steps.run-check.outputs.reachable }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: Install dependencies
+      shell: bash
+      run: pip install mcp
+
+    - name: Run MCP Health Check
+      id: run-check
+      shell: bash
+      run: python3 ${{ github.action_path }}/run_action.py
+      env:
+        INPUT_SERVER-COMMAND: ${{ inputs.server-command }}
+        INPUT_MIN-SCORE: ${{ inputs.min-score }}
