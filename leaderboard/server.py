@@ -614,10 +614,16 @@ def trigger_framework_check():
     en attendant une vraie tâche planifiée (cron) en production."""
     github_token = os.environ.get("GITHUB_TOKEN")
     events = framework_watch.run_framework_check(DB_PATH, github_token=github_token)
+
+    email_result = None
+    if events:
+        email_result = framework_watch.send_framework_alert_emails(DB_PATH, events)
+
     return jsonify({
         "checked": True,
         "changes_detected": len(events),
         "events": events,
+        "email_notification": email_result,
     })
 
 

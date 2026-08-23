@@ -208,6 +208,98 @@ def run_framework_check(db_path: str, github_token: str | None = None) -> list[d
     return events
 
 
+def get_subscriber_emails(db_path: str) -> list[str]:
+    """Récupère la liste de tous les emails abonnés aux alertes."""
+    conn = db_layer.get_db(db_path)
+    rows = conn.execute("SELECT email FROM framework_subscribers").fetchall()
+    conn.close()
+    return [r["email"] for r in rows]
+
+
+def format_alert_email(events: list[dict]) -> str:
+    """Construit le corps de l'email d'alerte à partir des changements détectés."""
+    lines = [
+        "Bonjour,",
+        "",
+        "Un ou plusieurs référentiels utilisés par MCP Trust Score ont été mis à jour :",
+        "",
+    ]
+    for e in events:
+        lines.append(f"🔔 {e['framework']}")
+        if e.get("summary"):
+            lines.append(f"   {e['summary']}")
+        if e.get("url"):
+            lines.append(f"   Voir le changement : {e['url']}")
+        lines.append("")
+
+    lines += [
+        "⚠️ Rappel important : cette alerte signale un changement du référentiel de",
+        "référence — elle ne met PAS à jour automatiquement les contrôles de score.",
+        "Un humain doit vérifier si le changement impacte la logique de scoring.",
+        "",
+        "— MCP Trust Score",
+    ]
+    return "\n".join(lines)
+
+
+def send_framework_alert_emails(db_path: str, events: list[dict]) -> dict:
+    """Envoie un email à tous les abonnés quand des changements de
+    référentiel ont été détectés. Best-effort : un échec d'envoi ne
+    doit jamais faire planter le check principal (même principe que
+    l'ancrage blockchain ailleurs dans ce projet).
+
+    Prérequis (variables d'environnement) :
+        SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, SENDER_EMAIL
+    Service recommandé : Brevo (gratuit jusqu'à 300 emails/jour).
+
+    ⚠️ Non testé avec un vrai envoi SMTP dans cet environnement de dev
+    (pas d'accès réseau SMTP sortant dans ce sandbox). La logique de
+    requête des abonnés et de formatage d'email a été testée avec de
+    vraies données PostgreSQL."""
+    if not events:
+        return {"sent": 0, "reason": "Aucun changement à notifier."}
+
+    smtp_host = os.environ.get("SMTP_HOST")
+    if not smtp_host:
+        return {"sent": 0, "reason": "SMTP non configuré (SMTP_HOST manquant) — emails non envoyés."}
+
+    import smtplib
+    from email.mime.text import MIMEText
+
+    smtp_port = int(os.environ.get("SMTP_PORT", "587"))
+    smtp_user = os.environ.get("SMTP_USER")
+    smtp_password = os.environ.get("SMTP_PASSWORD")
+    sender_email = os.environ.get("SENDER_EMAIL", smtp_user)
+
+    subscribers = get_subscriber_emails(db_path)
+    if not subscribers:
+        return {"sent": 0, "reason": "Aucun abonné enregistré."}
+
+    body = format_alert_email(events)
+    sent_count = 0
+    errors = []
+
+    try:
+        with smtplib.SMTP(smtp_host, smtp_port) as server:
+            server.starttls()
+            server.login(smtp_user, smtp_password)
+
+            for email in subscribers:
+                try:
+                    msg = MIMEText(body)
+                    msg["Subject"] = "🔔 MCP Trust Score — Mise à jour de référentiel détectée"
+                    msg["From"] = sender_email
+                    msg["To"] = email
+                    server.send_message(msg)
+                    sent_count += 1
+                except Exception as e:
+                    errors.append(f"{email}: {e}")
+    except Exception as e:
+        return {"sent": sent_count, "reason": f"Échec de connexion SMTP : {e}", "errors": errors}
+
+    return {"sent": sent_count, "total_subscribers": len(subscribers), "errors": errors}
+
+
 def trigger_axiom_update(db_path: str, new_version_label: str):
     """Déclenchement MANUEL par l'auteure quand elle met à jour AXIOM
     elle-même — pas de détection automatique nécessaire, elle contrôle
