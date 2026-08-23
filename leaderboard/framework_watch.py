@@ -54,6 +54,8 @@ def init_framework_tables(db_path: str):
             framework TEXT NOT NULL,
             old_version TEXT,
             new_version TEXT,
+            change_url TEXT,
+            change_summary TEXT,
             detected_at TEXT DEFAULT {now}
         )
         """)
@@ -91,19 +93,27 @@ def set_stored_version(db_path: str, framework: str, version: str):
     conn.close()
 
 
-def record_update_event(db_path: str, framework: str, old_version: str, new_version: str):
+def record_update_event(db_path: str, framework: str, old_version: str, new_version: str,
+                         change_url: str = None, change_summary: str = None):
     conn = db_layer.get_db(db_path)
     with conn:
         conn.execute(
-            "INSERT INTO framework_update_events (framework, old_version, new_version) VALUES (?,?,?)",
-            (framework, old_version, new_version)
+            "INSERT INTO framework_update_events (framework, old_version, new_version, change_url, change_summary) VALUES (?,?,?,?,?)",
+            (framework, old_version, new_version, change_url, change_summary)
         )
     conn.close()
 
 
-def check_owasp_mcp_top10(github_token: str | None = None) -> str:
-    """Retourne le SHA du dernier commit touchant index.md du repo
-    OWASP MCP Top 10 — sert de "version" détectable."""
+def check_owasp_mcp_top10(github_token: str | None = None) -> dict:
+    """Retourne les infos du dernier commit touchant index.md du repo
+    OWASP MCP Top 10 — pas juste un SHA, mais aussi le lien direct et
+    le message de commit, pour rendre l'alerte exploitable sans avoir
+    à aller chercher soi-même.
+
+    ⚠️ Structure basée sur le schéma standard documenté de l'API GitHub
+    v3 (stable) — non re-vérifiée par un appel réel dans cette session
+    précise à cause de la limite de requêtes anonymes déjà atteinte.
+    Le premier vrai appel en production confirmera le format."""
     headers = {"Authorization": f"token {github_token}"} if github_token else {}
     response = requests.get(
         OWASP_REPO_API,
@@ -115,26 +125,46 @@ def check_owasp_mcp_top10(github_token: str | None = None) -> str:
     commits = response.json()
     if not commits:
         raise ValueError("Aucun commit trouvé — vérifie le chemin du fichier surveillé.")
-    return commits[0]["sha"]
+
+    commit = commits[0]
+    return {
+        "version": commit["sha"],
+        "url": commit.get("html_url", f"https://github.com/OWASP/www-project-mcp-top-10/commit/{commit['sha']}"),
+        "summary": commit.get("commit", {}).get("message", "").split("\n")[0][:200],
+        "date": commit.get("commit", {}).get("author", {}).get("date"),
+    }
 
 
-def check_nist_ai_rmf() -> str:
+def check_nist_ai_rmf() -> dict:
     """Retourne un hash du contenu de la page officielle NIST AI RMF —
-    pas d'API de versioning officielle, donc on détecte un changement
-    de contenu comme proxy."""
+    pas d'API de versioning officielle chez NIST (contrairement à
+    OWASP/GitHub), donc pas de lien "vers le changement précis" possible
+    — seulement un lien vers la page à consulter manuellement."""
     headers = {
         "User-Agent": "Mozilla/5.0 (compatible; MCPTrustScoreBot/1.0; "
                        "+https://github.com/mcp-trust-score-org/mcp-trust-score)"
     }
     response = requests.get(NIST_AI_RMF_PAGE, headers=headers, timeout=15)
     response.raise_for_status()
-    return hashlib.sha256(response.content).hexdigest()
+    return {
+        "version": hashlib.sha256(response.content).hexdigest(),
+        "url": NIST_AI_RMF_PAGE,
+        "summary": "Contenu de la page modifié — pas de détail automatique disponible, à consulter manuellement.",
+        "date": None,
+    }
 
 
 def run_framework_check(db_path: str, github_token: str | None = None) -> list[dict]:
-    """Vérifie OWASP et NIST, enregistre les changements détectés.
+    """Vérifie OWASP et NIST, enregistre les changements détectés avec
+    un lien exploitable (commit GitHub pour OWASP, page pour NIST).
     AXIOM n'est pas vérifié ici — voir trigger_axiom_update() pour son
-    déclenchement manuel."""
+    déclenchement manuel.
+
+    ⚠️ Rappel important : détecter un changement ne met PAS à jour les
+    contrôles de scoring eux-mêmes (nist_score.py, owasp_score.py) —
+    ça reste un signal "va vérifier", pas une mise à jour automatique
+    du code. Voir la discussion produit pour les options d'automatisation
+    plus poussée (brouillon assisté par IA, non construit)."""
     init_framework_tables(db_path)
     events = []
 
@@ -145,11 +175,12 @@ def run_framework_check(db_path: str, github_token: str | None = None) -> list[d
 
     for framework, check_fn in checks.items():
         try:
-            new_version = check_fn()
+            result = check_fn()
         except Exception as e:
             print(f"⚠️  Échec de la vérification pour {framework} : {e}")
             continue
 
+        new_version = result["version"]
         old_version = get_stored_version(db_path, framework)
 
         if old_version is None:
@@ -158,10 +189,19 @@ def run_framework_check(db_path: str, github_token: str | None = None) -> list[d
             continue
 
         if old_version != new_version:
-            print(f"🔔 {framework} : changement détecté ({old_version[:12]}... -> {new_version[:12]}...)")
-            record_update_event(db_path, framework, old_version, new_version)
+            print(f"🔔 {framework} : changement détecté — {result['url']}")
+            record_update_event(
+                db_path, framework, old_version, new_version,
+                change_url=result.get("url"), change_summary=result.get("summary"),
+            )
             set_stored_version(db_path, framework, new_version)
-            events.append({"framework": framework, "old_version": old_version, "new_version": new_version})
+            events.append({
+                "framework": framework,
+                "old_version": old_version,
+                "new_version": new_version,
+                "url": result.get("url"),
+                "summary": result.get("summary"),
+            })
         else:
             print(f"✅ {framework} : pas de changement.")
 
