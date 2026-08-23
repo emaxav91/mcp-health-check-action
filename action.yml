@@ -17,6 +17,14 @@ inputs:
     description: "Ancre un hash du rapport sur OpenTimestamps (Bitcoin). Ajoute un appel réseau externe, désactivé par défaut."
     required: false
     default: 'false'
+  submit-to-leaderboard:
+    description: "Soumet automatiquement le score au classement public MCP Trust Score"
+    required: false
+    default: 'false'
+  leaderboard-api-url:
+    description: "URL de l'API de classement (requis si submit-to-leaderboard=true)"
+    required: false
+    default: ''
 
 outputs:
   score:
@@ -25,6 +33,9 @@ outputs:
   axiom_score:
     description: "Score de signaux techniques AXIOM (Domaines 4 et 5, %)"
     value: ${{ steps.run-check.outputs.axiom_score }}
+  owasp_score:
+    description: "Score de signaux techniques OWASP MCP Top 10 (2 catégories sur 10, %)"
+    value: ${{ steps.run-check.outputs.owasp_score }}
   blockchain_proof:
     description: "Chemin du fichier de preuve OpenTimestamps (.ots), vide si non activé ou échec"
     value: ${{ steps.run-check.outputs.blockchain_proof }}
@@ -45,7 +56,7 @@ runs:
 
     - name: Install dependencies
       shell: bash
-      run: pip install mcp opentimestamps-client
+      run: pip install mcp opentimestamps-client requests
 
     - name: Run MCP Health Check
       id: run-check
@@ -55,3 +66,5 @@ runs:
         INPUT_SERVER-COMMAND: ${{ inputs.server-command }}
         INPUT_MIN-SCORE: ${{ inputs.min-score }}
         INPUT_ENABLE-BLOCKCHAIN-ANCHOR: ${{ inputs.enable-blockchain-anchor }}
+        INPUT_SUBMIT-TO-LEADERBOARD: ${{ inputs.submit-to-leaderboard }}
+        INPUT_LEADERBOARD-API-URL: ${{ inputs.leaderboard-api-url }}

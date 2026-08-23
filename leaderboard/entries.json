@@ -1,0 +1,10 @@
+[
+  {
+    "server_name": "test-server-demo",
+    "repo_url": "https://github.com/mcp-trust-score-org/mcp-trust-score",
+    "nist_score": 71.4,
+    "axiom_score": 62.5,
+    "verified_at": "2026-08-22",
+    "proof_hash": "03eabc6868a0244221d92f0c9700b801159e0b80fad7fbd54e8e5b0e00553a0d"
+  }
+]

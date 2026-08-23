@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MCP Trust Score — Public Leaderboard</title>
+  <style>
+    body {
+      font-family: -apple-system, "Segoe UI", Arial, sans-serif;
+      max-width: 900px; margin: 40px auto; padding: 0 20px; color: #1e293b;
+      background: #f8fafc;
+    }
+    h1 { color: #0f172a; }
+    .subtitle { color: #64748b; margin-bottom: 24px; }
+    table {
+      width: 100%; border-collapse: collapse; background: white;
+      border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    th, td { padding: 12px 16px; text-align: left; border-bottom: 1px solid #e2e8f0; }
+    th { background: #0f172a; color: white; font-weight: 600; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover { background: #f1f5f9; }
+    a { color: #2563eb; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .disclaimer {
+      margin-top: 24px; padding: 16px; background: #fefce8;
+      border: 1px solid #fde047; border-radius: 8px; font-size: 14px; color: #713f12;
+    }
+    .cta {
+      margin-top: 24px; padding: 16px; background: #eff6ff;
+      border-radius: 8px; font-size: 14px;
+    }
+    code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <h1>🏆 MCP Trust Score</h1>
+  <p class="subtitle">Public leaderboard of MCP servers by verified compliance score — NIST AI RMF, OWASP MCP Top 10 & AXIOM.</p>
+
+  <table>
+    <tr><th>Rank</th><th>Server</th><th>NIST Score</th><th>AXIOM Score</th><th>Verified on</th><th>Proof</th></tr>
+    
+        <tr>
+          <td>1</td>
+          <td><a href="https://github.com/mcp-trust-score-org/mcp-trust-score" target="_blank">test-server-demo</a></td>
+          <td>🟡 71.4%</td>
+          <td>62.5%</td>
+          <td>2026-08-22</td>
+          <td><code>03eabc6868a0...</code></td>
+        </tr>
+  </table>
+
+  <div class="cta">
+    <strong>Add your MCP server:</strong> open a
+    <a href="https://github.com/mcp-trust-score-org/mcp-trust-score/blob/main/leaderboard/entries.json" target="_blank">Pull Request</a>
+    adding your entry, with a score obtained via
+    <a href="https://github.com/mcp-trust-score-org/mcp-trust-score" target="_blank">MCP Trust Score</a>.
+  </div>
+
+  <div class="disclaimer">
+    ⚠️ These scores are self-reported by developers themselves, not audited by an
+    independent third party. The "Proof" column shows a hash anchored on
+    OpenTimestamps (Bitcoin) when available — verifiable, but it does not
+    guarantee the accuracy of the score itself, only that it wasn't modified
+    after the fact.
+  </div>
+</body>
+</html>

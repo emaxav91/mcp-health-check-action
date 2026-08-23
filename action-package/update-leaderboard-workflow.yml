@@ -1,0 +1,26 @@
+name: Update Leaderboard
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'leaderboard/entries.json'
+
+jobs:
+  update-leaderboard:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Générer le classement
+        run: python3 leaderboard/generate_leaderboard.py
+
+      - name: Commit si changement
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add LEADERBOARD.md docs/index.html
+          git diff --staged --quiet || git commit -m "Mise à jour automatique du classement"
+          git push

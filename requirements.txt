@@ -1,2 +1,4 @@
 mcp
 opentimestamps-client
+requests
+flask

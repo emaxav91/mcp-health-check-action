@@ -16,6 +16,7 @@ import sys
 from checker import run_health_check, print_report
 from nist_score import compute_nist_aligned_score, print_score_report
 from axiom_score import compute_axiom_technical_score, print_axiom_report
+from owasp_score import compute_owasp_technical_score, print_owasp_report
 from blockchain_anchor import compute_report_hash, create_opentimestamps_proof
 
 
@@ -60,6 +61,10 @@ def main():
     print_axiom_report(axiom)
     write_github_output("axiom_score", str(axiom.percentage))
 
+    owasp = compute_owasp_technical_score(result)
+    print_owasp_report(owasp)
+    write_github_output("owasp_score", str(owasp.percentage))
+
     # --- Ancrage blockchain (optionnel, désactivé par défaut) ---
     # Coche 'enable-blockchain-anchor: true' dans le workflow pour l'activer.
     # Désactivé par défaut car ça ajoute un appel réseau externe (serveurs
@@ -91,6 +96,42 @@ def main():
             # ne doit JAMAIS faire échouer le job principal.
             print(f"   ⚠️  Ancrage échoué (non bloquant) : {e}")
             write_github_output("blockchain_proof", "")
+
+    # --- Soumission automatique au classement (optionnelle) ---
+    submit_leaderboard = os.environ.get("INPUT_SUBMIT-TO-LEADERBOARD", "false").lower() == "true"
+    if submit_leaderboard:
+        leaderboard_api_url = os.environ.get("INPUT_LEADERBOARD-API-URL", "")
+        if not leaderboard_api_url:
+            print("\n⚠️  submit-to-leaderboard activé mais leaderboard-api-url manquant, ignoré.")
+        else:
+            print(f"\n📊 Soumission au classement public ({leaderboard_api_url})...")
+            try:
+                import requests
+                repo_url = os.environ.get("GITHUB_SERVER_URL", "") + "/" + os.environ.get("GITHUB_REPOSITORY", "")
+                submit_payload = {
+                    "server_name": result.get("server_name") or "unnamed",
+                    "repo_url": repo_url,
+                    "checked_at": result.get("checked_at"),
+                    "nist_score": score.percentage,
+                    "axiom_score": axiom.percentage,
+                }
+                # Ajoute le hash seulement s'il a été calculé (ancrage activé)
+                if enable_anchor:
+                    submit_payload["proof_hash"] = compute_report_hash({
+                        "server_name": result.get("server_name"),
+                        "checked_at": result.get("checked_at"),
+                        "nist_score": score.percentage,
+                        "axiom_score": axiom.percentage,
+                    })
+
+                response = requests.post(f"{leaderboard_api_url}/submit", json=submit_payload, timeout=15)
+                if response.status_code == 200:
+                    print("   ✅ Soumis avec succès au classement public.")
+                else:
+                    print(f"   ⚠️  Soumission refusée ({response.status_code}) : {response.text}")
+            except Exception as e:
+                # Comme pour l'ancrage : ne doit JAMAIS faire échouer le job principal.
+                print(f"   ⚠️  Soumission échouée (non bloquant) : {e}")
 
     write_github_output("reachable", "true")
     write_github_output("score", str(score.percentage))
