@@ -647,5 +647,20 @@ def subscribe():
     return jsonify({"ok": True, "message": "Abonné aux alertes de mise à jour des référentiels."})
 
 
+@app.route("/test-email", methods=["POST"])
+def test_email():
+    """Envoie un email de test à tous les abonnés actuels, avec des
+    données factices — sert uniquement à vérifier que la configuration
+    SMTP (Brevo) fonctionne réellement, sans toucher au système de
+    détection de changement de référentiel."""
+    fake_events = [{
+        "framework": "test_smtp",
+        "summary": "Ceci est un email de test — la configuration SMTP fonctionne.",
+        "url": "https://mcp-trust-score.onrender.com",
+    }]
+    result = framework_watch.send_framework_alert_emails(DB_PATH, fake_events)
+    return jsonify(result)
+
+
 if __name__ == "__main__":
     app.run(debug=True, port=5000)
