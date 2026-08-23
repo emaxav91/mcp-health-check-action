@@ -1,0 +1,25 @@
+name: Vérification quotidienne des référentiels
+
+on:
+  schedule:
+    # Tous les jours à 8h00 UTC (9h ou 10h heure française selon l'heure d'été)
+    - cron: '0 8 * * *'
+  workflow_dispatch:
+    # Permet aussi de le déclencher manuellement depuis l'onglet Actions,
+    # utile pour tester sans attendre le lendemain
+
+jobs:
+  check-frameworks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Déclenche la vérification des référentiels
+        run: |
+          response=$(curl -s -X POST https://mcp-trust-score.onrender.com/framework-check)
+          echo "Réponse : $response"
+
+          # Fait échouer le job si la requête elle-même a échoué (pas si
+          # simplement aucun changement n'a été détecté)
+          if [ -z "$response" ]; then
+            echo "❌ Aucune réponse reçue du serveur"
+            exit 1
+          fi

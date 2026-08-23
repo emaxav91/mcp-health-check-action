@@ -318,3 +318,64 @@ auto-applied).
 for each detected change — verified end to end against real PostgreSQL.
 For NIST, no per-change link is possible (no public version history
 API) — only a link to the page itself, to check manually.
+
+## Automatic daily framework check (cron)
+
+Instead of relying on manual `curl` calls, a scheduled GitHub Action
+(`action-package/framework-watch-cron.yml`) triggers `/framework-check`
+automatically once a day — reusing GitHub Actions (already free and in
+use in this project) instead of a separate paid cron service.
+
+✅ **Tested**: YAML syntax and cron expression validated (`0 8 * * *` =
+daily at 08:00 UTC). The actual scheduled trigger itself can only be
+confirmed once installed on GitHub (schedules don't run locally).
+
+### Install it
+
+Copy `action-package/framework-watch-cron.yml` to
+`.github/workflows/framework-watch-cron.yml` in your repo, then push.
+You can also trigger it manually anytime from the Actions tab
+(`workflow_dispatch` is enabled) to test without waiting a full day.
+
+## Public companies certification page (Gold / Platinum)
+
+A gap was identified and fixed: Gold/Platinum tiers were computed and
+stored, but never displayed anywhere publicly (unlike the technical
+EMMA/Silver badges, visible on the leaderboard). Added:
+
+```
+GET /companies       # HTML page listing all Gold/Platinum companies
+GET /companies.json  # same data, JSON
+```
+
+✅ **Tested end to end against real PostgreSQL**, including the full
+Platinum case (organizational audit + linked repo holding technical
+Silver tier) — both correctly displayed, sorted by tier then score.
+
+## Redesigned organizational audit (radar chart, full report)
+
+Following user feedback that the original audit form felt too basic
+for a serious self-assessment tool, it was completely redesigned:
+
+- **Professional visual design** — card-based layout, color-coded score
+  selectors, proper typography, instead of plain dropdowns
+- **Evidence field per question** — auditors document proof/justification,
+  not just a bare score
+- **Full HTML report page** (`/audit-report/<id>`) generated after
+  submission, instead of a bare JSON response, including:
+  - Overall maturity score and tier badge
+  - **Radar chart** (pure SVG, no external JS library dependency) showing
+    the score per domain
+  - Automatically identified **strengths and weaknesses** (top/bottom
+    scoring domains)
+  - Full detail with evidence, color-coded by score
+
+✅ **Tested end to end against real PostgreSQL**: form renders with new
+fields, submission with varied scores + evidence stored correctly,
+report page generates with correct radar SVG, strengths/weaknesses, and
+evidence text displayed. Radar chart geometry was verified mathematically
+(exact coordinate checks for known angles/percentages) before integration.
+
+⚠️ Two real bugs were introduced and caught during this session by
+checking function lists after each edit (not assuming success) — a
+recurring lesson applied consistently throughout this project's history.

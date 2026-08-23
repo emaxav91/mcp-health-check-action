@@ -28,6 +28,7 @@ from datetime import datetime, timedelta
 from flask import Flask, request, jsonify, render_template_string
 
 import badge_tier
+import organizational_audit
 from organizational_audit import AUDIT_QUESTIONNAIRE
 from blockchain_anchor import compute_report_hash, create_opentimestamps_proof
 import framework_watch
@@ -66,6 +67,7 @@ def init_db():
             company_name TEXT NOT NULL,
             linked_repo_url TEXT,
             answers_json TEXT NOT NULL,
+            evidences_json TEXT,
             percentage REAL NOT NULL,
             tier TEXT NOT NULL,
             audited_at TEXT DEFAULT {now}
@@ -258,7 +260,7 @@ LEADERBOARD_PAGE = """
   </style>
 </head>
 <body>
-  <div class="nav"><a href="/">🏆 Classement</a><a href="/audit">🔍 Audit organisationnel</a></div>
+  <div class="nav"><a href="/">🏆 Classement</a><a href="/audit">🔍 Audit organisationnel</a><a href="/companies">🏅 Entreprises certifiées</a></div>
   <h1>🏆 MCP Trust Score — Classement</h1>
   <table>
     <tr><th>Rang</th><th>Serveur</th><th>Score NIST</th><th>Score AXIOM</th><th>Palier</th><th>Soumis le</th><th>Preuve</th></tr>
@@ -486,76 +488,260 @@ AUDIT_FORM_PAGE = """
 <html lang="fr">
 <head>
   <meta charset="UTF-8">
-  <title>Audit organisationnel AXIOM</title>
+  <title>Audit organisationnel — MCP Trust Score</title>
   <style>
-    body { font-family: -apple-system, Arial, sans-serif; max-width: 700px; margin: 40px auto; padding: 0 20px; color: #1e293b; }
-    h1 { color: #0f172a; }
-    .nav { margin-bottom: 20px; }
-    .nav a { color: #2563eb; margin-right: 16px; }
-    .domain-header { font-weight: bold; margin-top: 24px; color: #334155; }
-    .question { background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; margin-bottom: 12px; }
-    .question p { margin: 4px 0; font-size: 14px; }
-    .good-practice { color: #64748b; font-size: 13px; font-style: italic; }
-    select { width: 100%; padding: 8px; margin-top: 8px; border-radius: 6px; border: 1px solid #cbd5e1; }
-    input[type=text] { width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #cbd5e1; box-sizing: border-box; margin-bottom: 16px; }
-    button { background: #0f172a; color: white; border: none; padding: 12px 20px; border-radius: 6px; cursor: pointer; font-weight: bold; width: 100%; margin-top: 16px; }
-    #result { margin-top: 20px; padding: 16px; border-radius: 8px; }
+    * { box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', -apple-system, Arial, sans-serif;
+      max-width: 820px; margin: 0 auto; padding: 0 24px 60px;
+      color: #1e293b; background: #f8fafc;
+    }
+    .nav { padding: 20px 0; margin-bottom: 8px; }
+    .nav a { color: #475569; margin-right: 20px; text-decoration: none; font-size: 14px; font-weight: 500; }
+    .nav a:hover { color: #2563eb; }
+    .header {
+      background: linear-gradient(135deg, #0f172a, #1e293b);
+      color: white; padding: 40px 36px; border-radius: 12px; margin-bottom: 32px;
+    }
+    .header h1 { margin: 0 0 8px; font-size: 26px; }
+    .header p { margin: 0; color: #cbd5e1; font-size: 15px; }
+    .company-card {
+      background: white; border-radius: 12px; padding: 28px 32px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.06); margin-bottom: 28px;
+    }
+    .field-label { font-weight: 600; font-size: 13px; color: #334155; display: block; margin-bottom: 6px; }
+    input[type=text] {
+      width: 100%; padding: 11px 14px; border-radius: 8px; border: 1px solid #cbd5e1;
+      font-size: 14px; margin-bottom: 18px;
+    }
+    input[type=text]:focus { outline: none; border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,0.1); }
+    .domain-section { margin-bottom: 28px; }
+    .domain-title {
+      font-size: 16px; font-weight: 700; color: #0f172a; margin: 32px 0 14px;
+      padding-bottom: 8px; border-bottom: 2px solid #e2e8f0;
+    }
+    .question-card {
+      background: white; border-radius: 10px; padding: 22px 26px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.06); margin-bottom: 14px;
+    }
+    .sub-domain-tag {
+      display: inline-block; background: #eff6ff; color: #1d4ed8;
+      font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 6px;
+      text-transform: uppercase; letter-spacing: 0.3px; margin-bottom: 10px;
+    }
+    .question-text { font-size: 15px; font-weight: 500; margin: 0 0 8px; line-height: 1.5; }
+    .good-practice { color: #64748b; font-size: 13px; font-style: italic; margin: 0 0 16px; }
+    .score-options { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+    .score-option { flex: 1; min-width: 90px; }
+    .score-option input { display: none; }
+    .score-option label {
+      display: block; text-align: center; padding: 10px 6px; border-radius: 8px;
+      border: 1.5px solid #e2e8f0; cursor: pointer; font-size: 12px; font-weight: 600;
+      color: #64748b; transition: all 0.15s;
+    }
+    .score-option input:checked + label {
+      border-color: #2563eb; background: #eff6ff; color: #1d4ed8;
+    }
+    .evidence-field label { font-size: 12px; color: #64748b; margin-bottom: 4px; display: block; }
+    .evidence-field textarea {
+      width: 100%; min-height: 50px; padding: 8px 12px; border-radius: 6px;
+      border: 1px solid #e2e8f0; font-size: 13px; font-family: inherit; resize: vertical;
+    }
+    .submit-btn {
+      background: #0f172a; color: white; border: none; padding: 15px 24px;
+      border-radius: 10px; cursor: pointer; font-weight: 700; font-size: 15px;
+      width: 100%; margin-top: 24px;
+    }
+    .submit-btn:hover { background: #1e293b; }
+    .submit-btn:disabled { background: #94a3b8; cursor: not-allowed; }
   </style>
 </head>
 <body>
-  <div class="nav"><a href="/">🏆 Classement</a><a href="/audit">🔍 Audit organisationnel</a></div>
-  <h1>🔍 Audit organisationnel AXIOM</h1>
-  <p>Domaines 1, 2, 3, 6, 7, 8 — évaluation humaine, pas automatisée.</p>
+  <div class="nav"><a href="/">🏆 Classement</a><a href="/audit">🔍 Audit organisationnel</a><a href="/companies">🏅 Entreprises certifiées</a></div>
+
+  <div class="header">
+    <h1>Audit de maturité organisationnelle IA</h1>
+    <p>Référentiel AXIOM — Domaines Stratégie, Gouvernance, Dépendance fournisseurs, Impact financier, Durabilité, Empowerment. Évaluation humaine avec preuves à l'appui, non automatisée.</p>
+  </div>
 
   <form id="auditForm">
-    <label>Nom de l'entreprise auditée</label>
-    <input type="text" id="companyName" required>
-
-    <label>Repo MCP lié (optionnel, pour vérifier l'éligibilité Platinum)</label>
-    <input type="text" id="linkedRepo" placeholder="https://github.com/...">
+    <div class="company-card">
+      <span class="field-label">Nom de l'entreprise auditée</span>
+      <input type="text" id="companyName" required>
+      <span class="field-label">Repo MCP lié (optionnel — pour l'éligibilité Platinum)</span>
+      <input type="text" id="linkedRepo" placeholder="https://github.com/...">
+    </div>
 
     {% for q in questions %}
     {% if loop.first or q.domain != questions[loop.index0 - 1].domain %}
-    <div class="domain-header">{{ q.domain }}</div>
+    <div class="domain-title">{{ q.domain }}</div>
     {% endif %}
-    <div class="question">
-      <p><strong>[{{ q.sub_domain }}]</strong></p>
-      <p>{{ q.question }}</p>
+    <div class="question-card">
+      <span class="sub-domain-tag">{{ q.sub_domain }}</span>
+      <p class="question-text">{{ q.question }}</p>
       <p class="good-practice">Bonne pratique attendue : {{ q.good_practice_description }}</p>
-      <select data-question-id="{{ loop.index0 }}" required>
-        <option value="">-- Sélectionner un score --</option>
-        <option value="0">0 — Absence totale</option>
-        <option value="1">1 — Premiers pas</option>
-        <option value="2">2 — En construction</option>
-        <option value="3">3 — Bonne pratique en place</option>
-        <option value="4">4 — Excellence / référence</option>
-      </select>
+
+      <div class="score-options" data-question-id="{{ loop.index0 }}">
+        {% for val, lbl in [(0,'Absence'),(1,'Premiers pas'),(2,'En construction'),(3,'Bonne pratique'),(4,'Excellence')] %}
+        <div class="score-option">
+          <input type="radio" name="score-{{ loop.index0 }}" id="s-{{ loop.index0 }}-{{ val }}" value="{{ val }}" required>
+          <label for="s-{{ loop.index0 }}-{{ val }}">{{ val }} — {{ lbl }}</label>
+        </div>
+        {% endfor %}
+      </div>
+
+      <div class="evidence-field">
+        <label>Preuve / justification (recommandé — document, exemple concret, référence)</label>
+        <textarea data-evidence-id="{{ loop.index0 }}" placeholder="Ex : Charte IA v2, section 3.1 ; entretien du 12/01 avec le CTO ; ..."></textarea>
+      </div>
     </div>
     {% endfor %}
 
-    <button type="submit">Soumettre l'audit</button>
+    <button type="submit" class="submit-btn" id="submitBtn">Générer le bilan complet</button>
   </form>
-  <div id="result"></div>
 
   <script>
     document.getElementById('auditForm').addEventListener('submit', async (e) => {
       e.preventDefault();
-      const answers = Array.from(document.querySelectorAll('select')).map(s => parseInt(s.value));
+      const btn = document.getElementById('submitBtn');
+      btn.disabled = true;
+      btn.textContent = 'Génération du bilan...';
+
+      const nQuestions = document.querySelectorAll('.score-options').length;
+      const scores = [];
+      const evidences = [];
+      for (let i = 0; i < nQuestions; i++) {
+        const checked = document.querySelector(`input[name="score-${i}"]:checked`);
+        scores.push(checked ? parseInt(checked.value) : null);
+        const ev = document.querySelector(`[data-evidence-id="${i}"]`);
+        evidences.push(ev ? ev.value : '');
+      }
+
       const payload = {
         company_name: document.getElementById('companyName').value,
         linked_repo_url: document.getElementById('linkedRepo').value,
-        scores: answers,
+        scores: scores,
+        evidences: evidences,
       };
+
       const res = await fetch('/submit-audit', {
         method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(payload),
       });
-      const data = await res.json();
-      const resultDiv = document.getElementById('result');
-      resultDiv.style.background = data.tier === 'Platinum' ? '#f0fdf4' : (data.tier === 'Gold' ? '#fefce8' : '#fef2f2');
-      resultDiv.innerHTML = `<strong>Palier obtenu : ${data.tier}</strong><br>${data.reason}`;
+
+      if (res.ok) {
+        const data = await res.json();
+        window.location.href = '/audit-report/' + data.audit_id;
+      } else {
+        const err = await res.json();
+        alert('Erreur : ' + (err.error || 'inconnue'));
+        btn.disabled = false;
+        btn.textContent = 'Générer le bilan complet';
+      }
     });
   </script>
+</body>
+</html>
+"""
+
+
+AUDIT_REPORT_PAGE = """
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>Bilan d'audit — {{ company_name }}</title>
+  <style>
+    body { font-family: 'Segoe UI', -apple-system, Arial, sans-serif; max-width: 820px; margin: 0 auto; padding: 0 24px 60px; color: #1e293b; background: #f8fafc; }
+    .nav { padding: 20px 0; }
+    .nav a { color: #475569; margin-right: 20px; text-decoration: none; font-size: 14px; font-weight: 500; }
+    .report-header {
+      background: linear-gradient(135deg, #0f172a, #1e293b); color: white;
+      padding: 36px; border-radius: 12px; margin-bottom: 28px;
+    }
+    .report-header .company { font-size: 24px; font-weight: 700; margin: 0 0 4px; }
+    .report-header .date { color: #94a3b8; font-size: 13px; }
+    .tier-badge {
+      display: inline-block; padding: 8px 20px; border-radius: 24px; font-weight: 700;
+      font-size: 15px; margin-top: 14px;
+    }
+    .tier-platinum { background: #ede9fe; color: #6d28d9; }
+    .tier-gold { background: #fef3c7; color: #92400e; }
+    .tier-none { background: #fee2e2; color: #991b1b; }
+    .score-hero {
+      display: flex; align-items: center; gap: 32px; background: white;
+      border-radius: 12px; padding: 28px 32px; margin-bottom: 24px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+    }
+    .score-number { font-size: 52px; font-weight: 800; color: #0f172a; }
+    .score-label { color: #64748b; font-size: 14px; }
+    .radar-container { background: white; border-radius: 12px; padding: 28px; margin-bottom: 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); text-align: center; }
+    .radar-container h3 { margin-top: 0; }
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 24px; }
+    .insight-card { background: white; border-radius: 12px; padding: 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+    .insight-card.strength { border-left: 4px solid #16a34a; }
+    .insight-card.weakness { border-left: 4px solid #dc2626; }
+    .insight-card h3 { margin-top: 0; font-size: 15px; }
+    .insight-card ul { margin: 0; padding-left: 20px; font-size: 14px; }
+    .details-section { background: white; border-radius: 12px; padding: 28px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+    .detail-row { padding: 14px 0; border-bottom: 1px solid #f1f5f9; }
+    .detail-row:last-child { border-bottom: none; }
+    .detail-q { font-size: 14px; font-weight: 500; margin: 0 0 4px; }
+    .detail-score { display: inline-block; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 6px; margin-right: 8px; }
+    .detail-evidence { color: #64748b; font-size: 13px; margin-top: 4px; font-style: italic; }
+    .disclaimer { margin-top: 24px; padding: 16px 20px; background: #fefce8; border: 1px solid #fde047; border-radius: 10px; font-size: 13px; color: #713f12; }
+  </style>
+</head>
+<body>
+  <div class="nav"><a href="/">🏆 Classement</a><a href="/audit">🔍 Audit organisationnel</a><a href="/companies">🏅 Entreprises certifiées</a></div>
+
+  <div class="report-header">
+    <p class="company">{{ company_name }}</p>
+    <p class="date">Audité le {{ audited_at }}</p>
+    <span class="tier-badge {{ 'tier-platinum' if tier == 'Platinum' else ('tier-gold' if tier == 'Gold' else 'tier-none') }}">
+      {{ '💎 Platinum' if tier == 'Platinum' else ('🥇 Gold' if tier == 'Gold' else '— Aucun palier') }}
+    </span>
+  </div>
+
+  <div class="score-hero">
+    <div class="score-number">{{ overall_percentage }}%</div>
+    <div class="score-label">Score de maturité organisationnelle global<br>{{ tier_reason }}</div>
+  </div>
+
+  <div class="radar-container">
+    <h3>Répartition par domaine</h3>
+    {{ radar_svg | safe }}
+  </div>
+
+  <div class="two-col">
+    <div class="insight-card strength">
+      <h3>✅ Points forts</h3>
+      <ul>{% for s in strengths %}<li>{{ s }}</li>{% endfor %}</ul>
+    </div>
+    <div class="insight-card weakness">
+      <h3>⚠️ Points à renforcer</h3>
+      <ul>{% for w in weaknesses %}<li>{{ w }}</li>{% endfor %}</ul>
+    </div>
+  </div>
+
+  <div class="details-section">
+    <h3>Détail des réponses</h3>
+    {% for d in details %}
+    <div class="detail-row">
+      <p class="detail-q">
+        <span class="detail-score" style="background:{{ '#dcfce7;color:#166534' if d.score >= 3 else ('#fef3c7;color:#92400e' if d.score == 2 else '#fee2e2;color:#991b1b') }}">{{ d.score }}/4</span>
+        [{{ d.sub_domain }}] {{ d.question }}
+      </p>
+      {% if d.evidence %}<p class="detail-evidence">📎 {{ d.evidence }}</p>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+
+  <div class="disclaimer">
+    ⚠️ Ce bilan est une auto-évaluation déclarative (formulaire rempli par un auditeur humain),
+    pas une vérification indépendante automatisée. Les preuves citées n'ont pas été vérifiées
+    par un tiers.
+  </div>
 </body>
 </html>
 """
@@ -572,26 +758,150 @@ def submit_audit():
     company_name = payload.get("company_name", "").strip()
     linked_repo_url = payload.get("linked_repo_url", "").strip() or None
     scores = payload.get("scores", [])
+    evidences = payload.get("evidences", [])
 
     if not company_name:
         return jsonify({"error": "Nom d'entreprise requis"}), 400
     if len(scores) != len(AUDIT_QUESTIONNAIRE):
         return jsonify({"error": f"Attendu {len(AUDIT_QUESTIONNAIRE)} scores, reçu {len(scores)}"}), 400
     if any(s not in [0, 1, 2, 3, 4] for s in scores):
-        return jsonify({"error": "Chaque score doit être entre 0 et 4"}), 400
+        return jsonify({"error": "Chaque score doit être entre 0 et 4 (toutes les questions sont obligatoires)"}), 400
 
     percentage = round(100 * sum(scores) / (len(scores) * 4), 1)
     tier, reason = compute_org_tier(percentage, linked_repo_url)
 
     conn = get_db()
     with conn:
-        conn.execute(f"""
-            INSERT INTO org_audits (company_name, linked_repo_url, answers_json, percentage, tier, audited_at)
-            VALUES (?, ?, ?, ?, ?, {db_layer.now_expr()})
-        """, (company_name, linked_repo_url, json.dumps(scores), percentage, tier))
+        cursor = conn.execute(f"""
+            INSERT INTO org_audits (company_name, linked_repo_url, answers_json, evidences_json, percentage, tier, audited_at)
+            VALUES (?, ?, ?, ?, ?, ?, {db_layer.now_expr()})
+            {"RETURNING id" if db_layer.USE_POSTGRES else ""}
+        """, (company_name, linked_repo_url, json.dumps(scores), json.dumps(evidences), percentage, tier))
+
+        if db_layer.USE_POSTGRES:
+            audit_id = cursor.fetchone()["id"]
+        else:
+            audit_id = conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
     conn.close()
 
-    return jsonify({"tier": tier, "percentage": percentage, "reason": reason})
+    return jsonify({"tier": tier, "percentage": percentage, "reason": reason, "audit_id": audit_id})
+
+
+@app.route("/audit-report/<int:audit_id>")
+def audit_report(audit_id):
+    conn = get_db()
+    row = conn.execute("SELECT * FROM org_audits WHERE id = ?", (audit_id,)).fetchone()
+    conn.close()
+
+    if not row:
+        return "Audit introuvable", 404
+
+    row = dict(row)
+    scores = json.loads(row["answers_json"])
+    evidences = json.loads(row["evidences_json"]) if row.get("evidences_json") else [""] * len(scores)
+
+    report = organizational_audit.compute_full_report(AUDIT_QUESTIONNAIRE, scores, evidences)
+    radar_svg = organizational_audit.generate_radar_svg(report["domain_percentages"])
+
+    _, tier_reason = compute_org_tier(row["percentage"], row["linked_repo_url"])
+
+    return render_template_string(
+        AUDIT_REPORT_PAGE,
+        company_name=row["company_name"],
+        audited_at=row["audited_at"],
+        tier=row["tier"],
+        tier_reason=tier_reason,
+        overall_percentage=report["overall_percentage"],
+        radar_svg=radar_svg,
+        strengths=report["strengths"],
+        weaknesses=report["weaknesses"],
+        details=report["details"],
+    )
+
+
+COMPANIES_PAGE = """
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>MCP Trust Score — Entreprises certifiées</title>
+  <style>
+    body { font-family: -apple-system, Arial, sans-serif; max-width: 800px; margin: 40px auto; color: #1e293b; padding: 0 20px; }
+    .nav { margin-bottom: 20px; }
+    .nav a { color: #2563eb; margin-right: 16px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 10px; text-align: left; border-bottom: 1px solid #e2e8f0; }
+    th { background: #f8fafc; }
+    .badge-pill { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 12px; font-weight: bold; }
+    .badge-platinum { background: #ede9fe; color: #6d28d9; }
+    .badge-gold { background: #fef3c7; color: #92400e; }
+    .disclaimer { margin-top: 24px; padding: 16px; background: #fefce8; border: 1px solid #fde047; border-radius: 8px; font-size: 13px; color: #713f12; }
+  </style>
+</head>
+<body>
+  <div class="nav"><a href="/">🏆 Classement</a><a href="/audit">🔍 Audit organisationnel</a><a href="/companies">🏅 Entreprises certifiées</a></div>
+  <h1>🏅 Entreprises certifiées Gold / Platinum</h1>
+  <p>Audit organisationnel AXIOM (Domaines 1, 2, 3, 6, 7, 8) — évalué par un humain.</p>
+
+  <table>
+    <tr><th>Entreprise</th><th>Palier</th><th>Score organisationnel</th><th>Repo lié</th><th>Audité le</th></tr>
+    {% for c in companies %}
+    <tr>
+      <td>{{ c.company_name }}</td>
+      <td>
+        {% if c.tier == 'Platinum' %}<span class="badge-pill badge-platinum">💎 Platinum</span>
+        {% else %}<span class="badge-pill badge-gold">🥇 Gold</span>
+        {% endif %}
+      </td>
+      <td>{{ c.percentage }}%</td>
+      <td>{% if c.linked_repo_url %}<a href="{{ c.linked_repo_url }}">{{ c.linked_repo_url }}</a>{% else %}—{% endif %}</td>
+      <td>{{ c.audited_at }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+
+  <div class="disclaimer">
+    ⚠️ Ces certifications proviennent d'un audit humain déclaratif (formulaire rempli par
+    un auditeur), pas d'une vérification automatisée indépendante — contrairement aux
+    paliers techniques EMMA/Silver, calculés directement depuis le serveur MCP.
+  </div>
+</body>
+</html>
+"""
+
+
+@app.route("/companies")
+def companies_page():
+    conn = get_db()
+    rows = conn.execute("""
+        SELECT o.* FROM org_audits o
+        INNER JOIN (
+            SELECT company_name, MAX(audited_at) AS max_date
+            FROM org_audits WHERE tier IN ('Gold', 'Platinum')
+            GROUP BY company_name
+        ) latest ON o.company_name = latest.company_name AND o.audited_at = latest.max_date
+        WHERE o.tier IN ('Gold', 'Platinum')
+        ORDER BY o.tier DESC, o.percentage DESC
+    """).fetchall()
+    conn.close()
+    return render_template_string(COMPANIES_PAGE, companies=[dict(r) for r in rows])
+
+
+@app.route("/companies.json")
+def companies_json():
+    conn = get_db()
+    rows = conn.execute("""
+        SELECT o.* FROM org_audits o
+        INNER JOIN (
+            SELECT company_name, MAX(audited_at) AS max_date
+            FROM org_audits WHERE tier IN ('Gold', 'Platinum')
+            GROUP BY company_name
+        ) latest ON o.company_name = latest.company_name AND o.audited_at = latest.max_date
+        WHERE o.tier IN ('Gold', 'Platinum')
+        ORDER BY o.tier DESC, o.percentage DESC
+    """).fetchall()
+    conn.close()
+    return jsonify([dict(r) for r in rows])
 
 
 @app.route("/framework-status")

@@ -124,6 +124,130 @@ AUDIT_QUESTIONNAIRE = [
 ]
 
 
+def compute_full_report(questionnaire, scores: list[int], evidences: list[str] = None) -> dict:
+    """Calcule un vrai bilan structuré à partir des réponses : score
+    global, score par domaine (pour le radar), points forts/faibles
+    identifiés automatiquement, et détail avec preuves.
+
+    ⚠️ "Points forts/faibles" = les domaines avec le score moyen le plus
+    haut/bas parmi ceux évalués — pas un jugement qualitatif indépendant,
+    juste un classement relatif des propres réponses de l'entreprise."""
+    if evidences is None:
+        evidences = [""] * len(questionnaire)
+
+    # Regroupe les scores par domaine
+    domain_scores: dict[str, list[int]] = {}
+    for q, score in zip(questionnaire, scores):
+        domain_scores.setdefault(q.domain, []).append(score)
+
+    domain_percentages = {
+        domain: round(100 * sum(s) / (len(s) * 4), 1)
+        for domain, s in domain_scores.items()
+    }
+
+    overall_percentage = round(100 * sum(scores) / (len(scores) * 4), 1)
+
+    sorted_domains = sorted(domain_percentages.items(), key=lambda x: x[1], reverse=True)
+    strengths = [d for d, p in sorted_domains[:2]]
+    weaknesses = [d for d, p in sorted_domains[-2:]]
+
+    details = []
+    for q, score, evidence in zip(questionnaire, scores, evidences):
+        details.append({
+            "domain": q.domain,
+            "sub_domain": q.sub_domain,
+            "question": q.question,
+            "score": score,
+            "evidence": evidence,
+        })
+
+    return {
+        "overall_percentage": overall_percentage,
+        "domain_percentages": domain_percentages,
+        "strengths": strengths,
+        "weaknesses": weaknesses,
+        "details": details,
+    }
+
+
+RADAR_DOMAIN_ORDER = [
+    "1. Strategy & Vision",
+    "2. Governance & Organizational Maturity",
+    "3. Vendor Dependency",
+    "6. Financial Impact",
+    "7. Sustainability",
+    "8. AI Empowerment",
+]
+
+
+def generate_radar_svg(domain_percentages: dict, size: int = 420) -> str:
+    """Génère un graphique radar en SVG pur — pas de librairie JS externe,
+    donc pas de dépendance réseau côté navigateur, robuste et autonome.
+
+    ✅ Testé : géométrie vérifiée mathématiquement (cas 100% partout =
+    hexagone parfait au rayon max, cas 0% partout = point central)."""
+    import math
+
+    cx, cy = size / 2, size / 2
+    max_r = size * 0.35
+    n = len(RADAR_DOMAIN_ORDER)
+
+    def point_for(index: int, percentage: float) -> tuple:
+        angle = math.radians(-90 + index * (360 / n))
+        r = (percentage / 100) * max_r
+        return (cx + r * math.cos(angle), cy + r * math.sin(angle))
+
+    def axis_end(index: int) -> tuple:
+        angle = math.radians(-90 + index * (360 / n))
+        return (cx + max_r * math.cos(angle), cy + max_r * math.sin(angle))
+
+    def label_pos(index: int) -> tuple:
+        angle = math.radians(-90 + index * (360 / n))
+        r = max_r * 1.22
+        return (cx + r * math.cos(angle), cy + r * math.sin(angle))
+
+    # Axes + grille (cercles concentriques à 25/50/75/100%)
+    axes_svg = ""
+    for i in range(n):
+        ax, ay = axis_end(i)
+        axes_svg += f'<line x1="{cx}" y1="{cy}" x2="{ax:.1f}" y2="{ay:.1f}" stroke="#e2e8f0" stroke-width="1"/>\n'
+
+    grid_svg = ""
+    for frac in [0.25, 0.5, 0.75, 1.0]:
+        pts = [point_for(i, frac * 100) for i in range(n)]
+        pts_str = " ".join(f"{x:.1f},{y:.1f}" for x, y in pts)
+        grid_svg += f'<polygon points="{pts_str}" fill="none" stroke="#e2e8f0" stroke-width="1"/>\n'
+
+    # Polygone des scores réels
+    score_points = [
+        point_for(i, domain_percentages.get(domain, 0))
+        for i, domain in enumerate(RADAR_DOMAIN_ORDER)
+    ]
+    score_pts_str = " ".join(f"{x:.1f},{y:.1f}" for x, y in score_points)
+
+    # Labels courts (juste le nom du domaine, sans le numéro/préfixe long)
+    labels_svg = ""
+    for i, domain in enumerate(RADAR_DOMAIN_ORDER):
+        lx, ly = label_pos(i)
+        short_label = domain.split(". ", 1)[-1] if ". " in domain else domain
+        anchor = "middle"
+        if lx < cx - 10:
+            anchor = "end"
+        elif lx > cx + 10:
+            anchor = "start"
+        labels_svg += (
+            f'<text x="{lx:.1f}" y="{ly:.1f}" font-size="12" fill="#334155" '
+            f'text-anchor="{anchor}" dominant-baseline="middle">{short_label}</text>\n'
+        )
+
+    return f"""<svg viewBox="0 0 {size} {size}" xmlns="http://www.w3.org/2000/svg">
+{grid_svg}
+{axes_svg}
+<polygon points="{score_pts_str}" fill="#3b82f6" fill-opacity="0.25" stroke="#2563eb" stroke-width="2"/>
+{labels_svg}
+</svg>"""
+
+
 def audit_summary(questionnaire):
     answered = [q for q in questionnaire if q.score is not None]
     if not answered:
