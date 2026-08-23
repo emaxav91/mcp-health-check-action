@@ -57,3 +57,14 @@ Dans le workflow d'un utilisateur (`.github/workflows/*.yml`) :
           submit-to-leaderboard: 'true'
           leaderboard-api-url: 'https://ton-url-render.onrender.com'
 ```
+
+## ⚠️ Point de vigilance technique : format des timestamps
+
+Toutes les insertions en base utilisent `datetime('now')` de SQLite
+(format `YYYY-MM-DD HH:MM:SS`). Si tu ajoutes un jour un script externe
+qui insère des lignes avec `datetime.now().isoformat()` de Python
+(format `YYYY-MM-DDTHH:MM:SS.ffffff`, avec un "T"), le tri
+chronologique (`ORDER BY submitted_at`) se casse silencieusement — les
+deux formats ne se trient pas correctement ensemble en comparaison de
+chaînes de caractères. Toujours utiliser `datetime('now')` côté SQL
+pour rester cohérent.

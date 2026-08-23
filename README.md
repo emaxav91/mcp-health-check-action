@@ -255,3 +255,18 @@ evidence" flag and a score of 0 by default, rather than an assumed
 good practice.
 
 See `leaderboard/data_room/README.md` for usage.
+
+## Automatic blockchain anchoring on tier progression
+
+Badge certification is now anchored **automatically** — but only when
+a repo's tier genuinely progresses (e.g., none → EMMA, or EMMA →
+Silver), not on every submission that merely maintains the same tier.
+This avoids spamming the blockchain with redundant certifications.
+
+✅ **Tested end to end**: verified that a genuine progression (none →
+EMMA) correctly triggers an anchoring attempt, and that a repeated
+submission maintaining the same tier does not re-trigger it. The actual
+network anchoring call fails gracefully in this dev environment (no
+network access to OpenTimestamps calendars) but never breaks the score
+submission response itself — same non-blocking pattern used elsewhere
+in this project.
