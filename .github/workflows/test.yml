@@ -20,3 +20,5 @@ jobs:
         with:
           server-command: 'python3 test_server.py'
           min-score: '70'
+          submit-to-leaderboard: 'true'
+          leaderboard-api-url: 'https://mcp-trust-score.onrender.com'
