@@ -29,6 +29,8 @@ from datetime import datetime, timedelta
 
 from flask import Flask, request, jsonify, render_template_string
 
+import badge_tier
+
 app = Flask(__name__)
 DB_PATH = "leaderboard.db"
 
@@ -48,12 +50,15 @@ def init_db():
         CREATE TABLE IF NOT EXISTS submissions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             server_name TEXT NOT NULL,
-            repo_url TEXT NOT NULL UNIQUE,
+            repo_url TEXT NOT NULL,
             nist_score REAL NOT NULL,
             axiom_score REAL NOT NULL,
             proof_hash TEXT,
             submitted_at TEXT DEFAULT (datetime('now'))
         )
+        """)
+        conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_repo_url ON submissions(repo_url)
         """)
     conn.close()
 
@@ -77,10 +82,13 @@ def verify_hash_consistency(payload: dict) -> bool:
 
 
 def check_rate_limit(repo_url: str) -> bool:
-    """Retourne True si la soumission est autorisée (pas trop récente)."""
+    """Retourne True si la soumission est autorisée (pas trop récente).
+    Se base sur la dernière soumission connue pour ce repo (peut y en
+    avoir plusieurs dans l'historique désormais)."""
     conn = get_db()
     row = conn.execute(
-        "SELECT submitted_at FROM submissions WHERE repo_url = ?", (repo_url,)
+        "SELECT submitted_at FROM submissions WHERE repo_url = ? ORDER BY submitted_at DESC LIMIT 1",
+        (repo_url,)
     ).fetchone()
     conn.close()
 
@@ -117,12 +125,6 @@ def submit():
         conn.execute("""
             INSERT INTO submissions (server_name, repo_url, nist_score, axiom_score, proof_hash, submitted_at)
             VALUES (?, ?, ?, ?, ?, datetime('now'))
-            ON CONFLICT(repo_url) DO UPDATE SET
-                server_name = excluded.server_name,
-                nist_score = excluded.nist_score,
-                axiom_score = excluded.axiom_score,
-                proof_hash = excluded.proof_hash,
-                submitted_at = excluded.submitted_at
         """, (
             payload["server_name"], payload["repo_url"],
             payload["nist_score"], payload["axiom_score"],
@@ -136,9 +138,14 @@ def submit():
 @app.route("/leaderboard.json")
 def leaderboard_json():
     conn = get_db()
-    rows = conn.execute(
-        "SELECT * FROM submissions ORDER BY nist_score DESC"
-    ).fetchall()
+    rows = conn.execute("""
+        SELECT s.* FROM submissions s
+        INNER JOIN (
+            SELECT repo_url, MAX(submitted_at) AS max_date
+            FROM submissions GROUP BY repo_url
+        ) latest ON s.repo_url = latest.repo_url AND s.submitted_at = latest.max_date
+        ORDER BY s.nist_score DESC
+    """).fetchall()
     conn.close()
     return jsonify([dict(r) for r in rows])
 
@@ -181,11 +188,47 @@ LEADERBOARD_PAGE = """
 @app.route("/")
 def leaderboard_page():
     conn = get_db()
-    rows = conn.execute(
-        "SELECT * FROM submissions ORDER BY nist_score DESC"
-    ).fetchall()
+    rows = conn.execute("""
+        SELECT s.* FROM submissions s
+        INNER JOIN (
+            SELECT repo_url, MAX(submitted_at) AS max_date
+            FROM submissions GROUP BY repo_url
+        ) latest ON s.repo_url = latest.repo_url AND s.submitted_at = latest.max_date
+        ORDER BY s.nist_score DESC
+    """).fetchall()
     conn.close()
     return render_template_string(LEADERBOARD_PAGE, entries=[dict(r) for r in rows])
+
+
+@app.route("/badge")
+def badge():
+    repo_url = request.args.get("repo_url")
+    if not repo_url:
+        return jsonify({"error": "Paramètre 'repo_url' requis"}), 400
+
+    history = badge_tier.get_submission_history(DB_PATH, repo_url)
+    result = badge_tier.compute_badge_tier(history)
+
+    response = {
+        "repo_url": repo_url,
+        "tier": result.tier,
+        "latest_axiom_score": result.latest_axiom_score,
+        "submission_count_in_window": result.submission_count_in_window,
+        "reason": result.reason,
+    }
+
+    # Hash de la certification, pour ancrage blockchain optionnel côté client
+    if result.tier != "none":
+        certification = {
+            "repo_url": repo_url,
+            "tier": result.tier,
+            "latest_axiom_score": result.latest_axiom_score,
+            "computed_at": datetime.now().isoformat(),
+        }
+        canonical = json.dumps(certification, sort_keys=True, separators=(",", ":"))
+        response["certification_hash"] = hashlib.sha256(canonical.encode()).hexdigest()
+
+    return jsonify(response)
 
 
 if __name__ == "__main__":

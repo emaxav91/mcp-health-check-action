@@ -1,0 +1,8 @@
+Charte IA de notre entreprise (v1, 2026)
+
+Notre entreprise s'engage à déployer l'IA de manière responsable.
+Un comité de gouvernance IA se réunit trimestriellement pour suivre
+les indicateurs clés (OKR) liés à notre stratégie IA.
+
+Nous avons mis en place une supervision humaine sur toutes nos
+solutions IA critiques, conformément aux réglementations en vigueur.

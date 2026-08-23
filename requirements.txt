@@ -2,3 +2,5 @@ mcp
 opentimestamps-client
 requests
 flask
+anthropic
+pypdf

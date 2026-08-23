@@ -180,3 +180,78 @@ General → Topics, or the gear icon next to "About" on the main page):
 
 MIT — see the `LICENSE` file. Free to reuse, modify, and redistribute,
 including commercially, as long as the copyright notice is kept.
+
+## Technical badge tiers (EMMA / Silver)
+
+The public API (`leaderboard/api.py`) can compute two technical badge
+tiers for a given server, based on its AXIOM technical score and
+verification recurrence over time:
+
+- **EMMA** *(Edge Methodology Management of AI)*: latest AXIOM technical
+  score ≥ 70% (≈ passing 6 out of 8 checks)
+- **Silver**: AXIOM score ≥ 80% (stricter than EMMA) on at least 3
+  qualifying verifications, with at least 14 days between the first and
+  last one, within a 30-day window — proves sustained compliance over
+  time, not a burst of closely-spaced checks
+
+```
+GET /badge?repo_url=https://github.com/your-org/your-repo
+```
+
+✅ **Tested end to end**: verified across multiple scenarios including
+the anti-gaming case — 3 closely-spaced submissions (all within days)
+correctly stay at EMMA tier; only submissions genuinely spread across
+≥14 days count toward Silver.
+
+⚠️ **Scope**: these two tiers apply to the technical agent/server itself
+(AXIOM Domains 4-5, already automated). Higher tiers evaluating the
+*organization* publishing the agent (AXIOM's other domains — Strategy,
+Governance, Accountability, etc.) would require a human-led audit
+process, not yet built — see project notes for design discussion.
+
+## Organizational audit (Gold / Platinum tiers)
+
+For the *organization publishing an agent* (not the agent itself), a
+human-led audit interface (`leaderboard/org_audit_form.py`) covers
+AXIOM's organizational domains (Strategy & Vision, Governance, Vendor
+Dependency, Financial Impact, Sustainability, AI Empowerment) — 11
+questions, scored 0-4 by a human auditor.
+
+- **Gold**: organizational audit average ≥ 75%
+- **Platinum**: Gold criteria AND at least one linked repo currently
+  holding the technical **Silver** tier — proves organizational maturity
+  is backed by real technical track record, not just stated intent
+
+✅ **Tested end to end**: form renders correctly (6 domain groupings,
+11 questions), submission validates score count and range, tier
+computation verified for both Gold (high scores) and rejection (low
+scores) cases.
+
+⚠️ This audit is intentionally NOT automated — these 11 questions
+require human judgment (interview, documentary evidence), unlike the
+technical EMMA/Silver tiers which are fully automated from a protocol
+connection.
+
+To run locally: `python3 leaderboard/org_audit_form.py` (port 5002).
+Requires hosting for real-world use, same considerations as the main
+leaderboard API.
+
+## AI-assisted audit (data room)
+
+To speed up the organizational audit, `leaderboard/ai_audit_assist.py`
+reads company documents (`.txt`, `.md`, `.pdf`) from a data room folder
+and asks Claude to propose draft scores for the 11 audit questions,
+citing evidence from the documents.
+
+✅ **Tested**: document loading (text + PDF) and prompt construction
+verified. The actual Claude API call was not tested in this dev
+environment (no API key available) but follows the same pattern already
+validated elsewhere in this project.
+
+⚠️ **This produces a draft only** — a human must review every proposed
+score before it's entered into `org_audit_form.py`. The AI is
+instructed to never invent evidence: uncovered topics get a "no
+evidence" flag and a score of 0 by default, rather than an assumed
+good practice.
+
+See `leaderboard/data_room/README.md` for usage.

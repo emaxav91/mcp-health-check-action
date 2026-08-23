@@ -1,0 +1,5 @@
+Rapport RSE 2026 - Section IA
+
+Nos modèles sont conçus pour minimiser la consommation énergétique.
+Nous mesurons et publions annuellement notre empreinte carbone liée
+au calcul IA.
