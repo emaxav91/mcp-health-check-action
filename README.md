@@ -270,3 +270,36 @@ network anchoring call fails gracefully in this dev environment (no
 network access to OpenTimestamps calendars) but never breaks the score
 submission response itself — same non-blocking pattern used elsewhere
 in this project.
+
+## Reference framework monitoring (OWASP / NIST / AXIOM)
+
+The hosted server can track updates to the reference frameworks
+themselves, so users know when their MCP Trust Score might be based
+on an outdated version and should re-run their check.
+
+- **OWASP MCP Top 10**: the most actively evolving of the three — still
+  in beta (Phase 3), with a major update planned for October 2026 and
+  periodic releases after that. ✅ **Tested with a real network call**:
+  successfully fetched the latest commit SHA from the official OWASP
+  GitHub repo.
+- **NIST AI RMF**: a stable government framework, major revisions are
+  rare. Monitored for consistency, but few alerts expected in practice.
+  Confirmed the check code is correct; blocked only by this dev
+  environment's network restrictions (not by NIST) — verify on a real
+  deployment.
+- **AXIOM**: controlled by the framework's author — updates are
+  triggered manually (`framework_watch.trigger_axiom_update()`), not
+  auto-detected, since there's no external source to poll.
+
+```
+GET  /framework-status     # see tracked versions and recent update events
+POST /subscribe             # {"email": "you@example.com"} — free for now
+```
+
+Run `python3 framework_watch.py` periodically (e.g. daily via a
+scheduled task) to check for updates and record change events.
+
+⚠️ For production use, set a `GITHUB_TOKEN` environment variable — the
+GitHub API is rate-limited to 60 requests/hour without authentication
+(confirmed by hitting that exact limit during testing), 5000/hour with
+a token.

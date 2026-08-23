@@ -29,6 +29,7 @@ from flask import Flask, request, jsonify, render_template_string
 import badge_tier
 from organizational_audit import AUDIT_QUESTIONNAIRE
 from blockchain_anchor import compute_report_hash, create_opentimestamps_proof
+import framework_watch
 
 app = Flask(__name__)
 DB_PATH = "leaderboard.db"
@@ -85,6 +86,7 @@ def init_db():
 
 init_db()  # Appelé au chargement du module — nécessaire pour gunicorn,
            # qui n'exécute jamais le bloc `if __name__ == "__main__"`.
+framework_watch.init_framework_tables(DB_PATH)
 
 
 # ============================================================
@@ -589,6 +591,40 @@ def submit_audit():
     conn.close()
 
     return jsonify({"tier": tier, "percentage": percentage, "reason": reason})
+
+
+@app.route("/framework-status")
+def framework_status():
+    conn = get_db()
+    rows = conn.execute("SELECT * FROM framework_versions").fetchall()
+    events = conn.execute(
+        "SELECT * FROM framework_update_events ORDER BY detected_at DESC LIMIT 10"
+    ).fetchall()
+    conn.close()
+    return jsonify({
+        "tracked_frameworks": [dict(r) for r in rows],
+        "recent_updates": [dict(e) for e in events],
+    })
+
+
+@app.route("/subscribe", methods=["POST"])
+def subscribe():
+    payload = request.get_json()
+    email = (payload.get("email") or "").strip().lower()
+    if not email or "@" not in email:
+        return jsonify({"error": "Email valide requis"}), 400
+
+    conn = get_db()
+    try:
+        with conn:
+            conn.execute(
+                "INSERT INTO framework_subscribers (email) VALUES (?)", (email,)
+            )
+    except sqlite3.IntegrityError:
+        conn.close()
+        return jsonify({"message": "Déjà abonné"}), 200
+    conn.close()
+    return jsonify({"ok": True, "message": "Abonné aux alertes de mise à jour des référentiels."})
 
 
 if __name__ == "__main__":
