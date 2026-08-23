@@ -21,6 +21,7 @@ Prérequis : pip install flask
 
 import hashlib
 import json
+import os
 import sqlite3
 from datetime import datetime, timedelta
 
@@ -604,6 +605,19 @@ def framework_status():
     return jsonify({
         "tracked_frameworks": [dict(r) for r in rows],
         "recent_updates": [dict(e) for e in events],
+    })
+
+
+@app.route("/framework-check", methods=["POST"])
+def trigger_framework_check():
+    """Déclenche une vérification à la demande — utile pour tester,
+    en attendant une vraie tâche planifiée (cron) en production."""
+    github_token = os.environ.get("GITHUB_TOKEN")
+    events = framework_watch.run_framework_check(DB_PATH, github_token=github_token)
+    return jsonify({
+        "checked": True,
+        "changes_detected": len(events),
+        "events": events,
     })
 
 
