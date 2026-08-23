@@ -28,12 +28,14 @@ from flask import Flask, request, jsonify, render_template_string
 
 import badge_tier
 from organizational_audit import AUDIT_QUESTIONNAIRE
+from blockchain_anchor import compute_report_hash, create_opentimestamps_proof
 
 app = Flask(__name__)
 DB_PATH = "leaderboard.db"
 
 RATE_LIMIT_MINUTES = 10
 GOLD_MIN_PERCENTAGE = 75.0
+TIER_ORDER = {"none": 0, "EMMA": 1, "Silver": 2}
 
 def get_db():
     conn = sqlite3.connect(DB_PATH)
@@ -65,6 +67,17 @@ def init_db():
             percentage REAL NOT NULL,
             tier TEXT NOT NULL,
             audited_at TEXT DEFAULT (datetime('now'))
+        )
+        """)
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS anchored_badges (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            repo_url TEXT NOT NULL,
+            tier TEXT NOT NULL,
+            certification_hash TEXT NOT NULL UNIQUE,
+            proof_path TEXT,
+            anchor_status TEXT DEFAULT 'pending',
+            anchored_at TEXT DEFAULT (datetime('now'))
         )
         """)
     conn.close()
@@ -119,15 +132,91 @@ def submit():
     if not check_rate_limit(payload["repo_url"]):
         return jsonify({"error": f"Trop de soumissions récentes. Réessaie dans {RATE_LIMIT_MINUTES} minutes."}), 429
 
+    repo_url = payload["repo_url"]
+
+    # Palier AVANT cette soumission, pour détecter une progression après coup
+    previous_history = badge_tier.get_submission_history(DB_PATH, repo_url)
+    previous_tier = badge_tier.compute_badge_tier(previous_history).tier
+
     conn = get_db()
     with conn:
         conn.execute("""
             INSERT INTO submissions (server_name, repo_url, nist_score, axiom_score, proof_hash, submitted_at)
             VALUES (?, ?, ?, ?, ?, datetime('now'))
-        """, (payload["server_name"], payload["repo_url"], payload["nist_score"],
+        """, (payload["server_name"], repo_url, payload["nist_score"],
               payload["axiom_score"], payload.get("proof_hash")))
     conn.close()
-    return jsonify({"ok": True}), 200
+
+    # Palier APRÈS cette soumission
+    updated_history = badge_tier.get_submission_history(DB_PATH, repo_url)
+    new_tier_result = badge_tier.compute_badge_tier(updated_history)
+    new_tier = new_tier_result.tier
+
+    response = {"ok": True}
+
+    # Ancrage automatique UNIQUEMENT en cas de vraie progression (ex: none->EMMA,
+    # EMMA->Silver) — pas à chaque soumission qui maintient le même palier,
+    # pour éviter de spammer la blockchain de certifications redondantes.
+    if TIER_ORDER.get(new_tier, 0) > TIER_ORDER.get(previous_tier, 0):
+        response["tier_progression"] = f"{previous_tier} -> {new_tier}"
+        anchor_result = _attempt_badge_anchor(repo_url, new_tier_result)
+        response["auto_anchor"] = anchor_result
+
+    return jsonify(response), 200
+
+
+def _attempt_badge_anchor(repo_url: str, tier_result) -> dict:
+    """Tente l'ancrage automatique d'un badge après une progression de
+    palier. Best-effort : un échec ici ne doit JAMAIS faire échouer la
+    soumission de score elle-même (même logique que l'ancrage principal
+    dans run_action.py)."""
+    certification_hash = compute_report_hash({
+        "repo_url": repo_url, "tier": tier_result.tier,
+        "latest_axiom_score": tier_result.latest_axiom_score,
+    })
+
+    conn = get_db()
+    existing = conn.execute(
+        "SELECT anchor_status FROM anchored_badges WHERE certification_hash = ?",
+        (certification_hash,)
+    ).fetchone()
+
+    if existing:
+        conn.close()
+        return {"status": existing["anchor_status"], "certification_hash": certification_hash, "note": "déjà tenté"}
+
+    with conn:
+        conn.execute(
+            "INSERT INTO anchored_badges (repo_url, tier, certification_hash, anchor_status) VALUES (?,?,?,?)",
+            (repo_url, tier_result.tier, certification_hash, "pending")
+        )
+    conn.close()
+
+    try:
+        report_path = f"/tmp/badge_{certification_hash[:16]}.json"
+        with open(report_path, "w") as f:
+            json.dump({"repo_url": repo_url, "tier": tier_result.tier, "certification_hash": certification_hash}, f)
+
+        proof_path = create_opentimestamps_proof(report_path)
+
+        conn = get_db()
+        with conn:
+            conn.execute(
+                "UPDATE anchored_badges SET anchor_status = 'anchored', proof_path = ? WHERE certification_hash = ?",
+                (proof_path, certification_hash)
+            )
+        conn.close()
+        return {"status": "anchored", "certification_hash": certification_hash, "proof_path": proof_path}
+
+    except Exception as e:
+        conn = get_db()
+        with conn:
+            conn.execute(
+                "UPDATE anchored_badges SET anchor_status = 'failed' WHERE certification_hash = ?",
+                (certification_hash,)
+            )
+        conn.close()
+        return {"status": "failed", "certification_hash": certification_hash, "error": str(e)}
 
 
 @app.route("/leaderboard.json")
@@ -157,6 +246,10 @@ LEADERBOARD_PAGE = """
     .score-high { color: #16a34a; font-weight: bold; }
     .score-mid { color: #ca8a04; font-weight: bold; }
     .score-low { color: #dc2626; font-weight: bold; }
+    .badge-pill { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 12px; font-weight: bold; }
+    .badge-silver { background: #e2e8f0; color: #475569; }
+    .badge-emma { background: #fef3c7; color: #92400e; }
+    .badge-none { color: #94a3b8; font-size: 12px; }
     .nav { margin-bottom: 20px; }
     .nav a { color: #2563eb; margin-right: 16px; }
   </style>
@@ -165,17 +258,50 @@ LEADERBOARD_PAGE = """
   <div class="nav"><a href="/">🏆 Classement</a><a href="/audit">🔍 Audit organisationnel</a></div>
   <h1>🏆 MCP Trust Score — Classement</h1>
   <table>
-    <tr><th>Rang</th><th>Serveur</th><th>Score NIST</th><th>Score AXIOM</th><th>Soumis le</th></tr>
+    <tr><th>Rang</th><th>Serveur</th><th>Score NIST</th><th>Score AXIOM</th><th>Palier</th><th>Soumis le</th><th>Preuve</th></tr>
     {% for e in entries %}
     <tr>
       <td>{{ loop.index }}</td>
       <td><a href="{{ e.repo_url }}">{{ e.server_name }}</a></td>
       <td class="{{ 'score-high' if e.nist_score >= 90 else ('score-mid' if e.nist_score >= 70 else 'score-low') }}">{{ e.nist_score }}%</td>
       <td>{{ e.axiom_score }}%</td>
+      <td>
+        {% if e.badge_tier == 'Silver' %}<span class="badge-pill badge-silver">🥈 Silver</span>
+        {% elif e.badge_tier == 'EMMA' %}<span class="badge-pill badge-emma">EMMA</span>
+        {% else %}<span class="badge-none">—</span>
+        {% endif %}
+        {% if e.badge_tier != 'none' %}
+          {% if e.anchor_status == 'anchored' %}<br><span style="font-size:11px;color:#16a34a;">⛓️ ancré</span>
+          {% elif e.anchor_status == 'pending' or e.anchor_status == 'failed' %}<br><span style="font-size:11px;color:#94a3b8;">ancrage {{ e.anchor_status }}</span>
+          {% else %}<br><button onclick="anchorBadge('{{ e.repo_url }}', this)" style="font-size:11px;padding:2px 6px;">Ancrer</button>
+          {% endif %}
+        {% endif %}
+      </td>
       <td>{{ e.submitted_at }}</td>
+      <td>{{ e.proof_hash[:12] + '...' if e.proof_hash else '—' }}</td>
     </tr>
     {% endfor %}
   </table>
+
+  <script>
+    async function anchorBadge(repoUrl, btn) {
+      btn.disabled = true;
+      btn.textContent = 'Ancrage...';
+      try {
+        const res = await fetch('/badge/anchor', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({repo_url: repoUrl}),
+        });
+        const data = await res.json();
+        alert(data.anchor_status === 'anchored' ? 'Ancré avec succès !' : ('Statut : ' + (data.anchor_status || data.error)));
+        location.reload();
+      } catch (e) {
+        alert('Erreur : ' + e.message);
+        btn.disabled = false;
+        btn.textContent = 'Ancrer';
+      }
+    }
+  </script>
 </body>
 </html>
 """
@@ -191,7 +317,30 @@ def leaderboard_page():
         ORDER BY s.nist_score DESC
     """).fetchall()
     conn.close()
-    return render_template_string(LEADERBOARD_PAGE, entries=[dict(r) for r in rows])
+
+    entries = []
+    for r in rows:
+        entry = dict(r)
+        history = badge_tier.get_submission_history(DB_PATH, entry["repo_url"])
+        tier_result = badge_tier.compute_badge_tier(history)
+        entry["badge_tier"] = tier_result.tier
+
+        entry["anchor_status"] = None
+        if tier_result.tier != "none":
+            cert_hash = compute_report_hash({
+                "repo_url": entry["repo_url"], "tier": tier_result.tier,
+                "latest_axiom_score": tier_result.latest_axiom_score,
+            })
+            conn2 = get_db()
+            existing = conn2.execute(
+                "SELECT anchor_status FROM anchored_badges WHERE certification_hash = ?", (cert_hash,)
+            ).fetchone()
+            conn2.close()
+            entry["anchor_status"] = existing["anchor_status"] if existing else "not_requested"
+
+        entries.append(entry)
+
+    return render_template_string(LEADERBOARD_PAGE, entries=entries)
 
 
 @app.route("/badge")
@@ -210,15 +359,100 @@ def badge():
         "reason": result.reason,
     }
     if result.tier != "none":
-        certification = {
+        certification_hash = compute_report_hash({
             "repo_url": repo_url, "tier": result.tier,
             "latest_axiom_score": result.latest_axiom_score,
-            "computed_at": datetime.now().isoformat(),
-        }
-        canonical = json.dumps(certification, sort_keys=True, separators=(",", ":"))
-        response["certification_hash"] = hashlib.sha256(canonical.encode()).hexdigest()
+        })
+        response["certification_hash"] = certification_hash
+
+        # Vérifie si cette certification exacte a déjà été ancrée
+        conn = get_db()
+        existing = conn.execute(
+            "SELECT anchor_status, proof_path FROM anchored_badges WHERE certification_hash = ?",
+            (certification_hash,)
+        ).fetchone()
+        conn.close()
+
+        if existing:
+            response["anchor_status"] = existing["anchor_status"]
+            response["proof_path"] = existing["proof_path"]
+        else:
+            response["anchor_status"] = "not_requested"
+            response["anchor_hint"] = "POST /badge/anchor avec ce repo_url pour ancrer ce badge sur la blockchain."
 
     return jsonify(response)
+
+
+@app.route("/badge/anchor", methods=["POST"])
+def anchor_badge():
+    """Déclenche l'ancrage blockchain réel d'un badge — action explicite,
+    séparée de la simple consultation (/badge), pour ne pas refaire un
+    appel réseau OpenTimestamps à chaque affichage de page."""
+    payload = request.get_json() or {}
+    repo_url = payload.get("repo_url") or request.args.get("repo_url")
+    if not repo_url:
+        return jsonify({"error": "Paramètre 'repo_url' requis"}), 400
+
+    history = badge_tier.get_submission_history(DB_PATH, repo_url)
+    result = badge_tier.compute_badge_tier(history)
+
+    if result.tier == "none":
+        return jsonify({"error": "Ce repo n'a atteint aucun palier — rien à ancrer."}), 400
+
+    certification_hash = compute_report_hash({
+        "repo_url": repo_url, "tier": result.tier,
+        "latest_axiom_score": result.latest_axiom_score,
+    })
+
+    conn = get_db()
+    existing = conn.execute(
+        "SELECT anchor_status, proof_path FROM anchored_badges WHERE certification_hash = ?",
+        (certification_hash,)
+    ).fetchone()
+
+    if existing:
+        conn.close()
+        return jsonify({
+            "message": "Déjà ancré ou en cours — pas de nouvel ancrage déclenché.",
+            "certification_hash": certification_hash,
+            "anchor_status": existing["anchor_status"],
+        })
+
+    # Insère un enregistrement "pending" avant même de tenter l'ancrage,
+    # pour éviter une double soumission si deux requêtes arrivent en même temps
+    with conn:
+        conn.execute(
+            "INSERT INTO anchored_badges (repo_url, tier, certification_hash, anchor_status) VALUES (?,?,?,?)",
+            (repo_url, result.tier, certification_hash, "pending")
+        )
+    conn.close()
+
+    try:
+        report_path = f"/tmp/badge_{certification_hash[:16]}.json"
+        with open(report_path, "w") as f:
+            json.dump({"repo_url": repo_url, "tier": result.tier, "certification_hash": certification_hash}, f)
+
+        proof_path = create_opentimestamps_proof(report_path)
+
+        conn = get_db()
+        with conn:
+            conn.execute(
+                "UPDATE anchored_badges SET anchor_status = 'anchored', proof_path = ? WHERE certification_hash = ?",
+                (proof_path, certification_hash)
+            )
+        conn.close()
+
+        return jsonify({"certification_hash": certification_hash, "anchor_status": "anchored", "proof_path": proof_path})
+
+    except Exception as e:
+        conn = get_db()
+        with conn:
+            conn.execute(
+                "UPDATE anchored_badges SET anchor_status = 'failed' WHERE certification_hash = ?",
+                (certification_hash,)
+            )
+        conn.close()
+        return jsonify({"error": f"Échec de l'ancrage : {e}", "certification_hash": certification_hash, "anchor_status": "failed"}), 500
 
 
 # ============================================================
