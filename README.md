@@ -303,3 +303,18 @@ scheduled task) to check for updates and record change events.
 GitHub API is rate-limited to 60 requests/hour without authentication
 (confirmed by hitting that exact limit during testing), 5000/hour with
 a token.
+
+## ⚠️ Important: what framework detection does NOT do
+
+Detecting a framework update **does not automatically update the
+scoring logic** (`nist_score.py`, `owasp_score.py`, `axiom_score.py`).
+It's a "go check this" signal, not an automated code update — turning
+a real framework change into new scoring rules requires human judgment
+(same principle applied to the AI-assisted audit: draft, never
+auto-applied).
+
+✅ **Tested**: `/framework-status` now returns an actionable `change_url`
+(direct link to the OWASP commit) and `change_summary` (commit message)
+for each detected change — verified end to end against real PostgreSQL.
+For NIST, no per-change link is possible (no public version history
+API) — only a link to the page itself, to check manually.

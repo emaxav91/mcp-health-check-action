@@ -100,3 +100,35 @@ le code continue de fonctionner en SQLite (utile pour tester en local).
 d'inactivité du compte de facturation (vérifie les conditions actuelles
 sur render.com au moment de la mise en prod) — suffisant pour valider
 le produit, mais prévoir un plan payant avant un usage long terme sérieux.
+
+## Envoi d'emails d'alerte (Brevo — API HTTP, pas SMTP)
+
+⚠️ **Découverte importante en conditions réelles** : la première version
+utilisait SMTP classique, mais **Render bloque tous les ports SMTP (25,
+465, 587) sur son tier gratuit** depuis septembre 2025 — confirmé par un
+vrai crash du worker (`SystemExit` via timeout de connexion) lors d'un
+test réel sur Render. Corrigé en passant par l'**API HTTP de Brevo**
+(port 443, jamais bloqué par les hébergeurs cloud, puisque ça casserait
+le web entier).
+
+✅ **Testé** : gestion d'erreur (clé API manquante, pas d'abonnés) vérifiée.
+⚠️ **Non testé** : le vrai appel réseau à `api.brevo.com` — bloqué par la
+restriction réseau spécifique à cet environnement de dev (pas une
+restriction Render). À confirmer au premier vrai test sur Render.
+
+### Configurer Brevo (API, pas SMTP)
+
+1. Sur Brevo : Menu (photo de profil) → **SMTP & API** → onglet **"API Keys"**
+   (pas "SMTP", cette fois)
+2. Génère une nouvelle clé API si tu n'en as pas déjà une
+3. Sur Render, service `mcp-trust-score` → Environment Variables :
+   - `BREVO_API_KEY` = ta clé API (pas la clé SMTP utilisée avant)
+   - `SENDER_EMAIL` = ton adresse email vérifiée sur Brevo
+
+Tu peux **retirer** les anciennes variables `SMTP_HOST`, `SMTP_PORT`,
+`SMTP_USER`, `SMTP_PASSWORD` — elles ne sont plus utilisées.
+
+Une fois configuré, teste avec :
+```bash
+curl -X POST https://mcp-trust-score.onrender.com/test-email
+```

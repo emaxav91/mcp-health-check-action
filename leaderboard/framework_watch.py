@@ -244,32 +244,33 @@ def format_alert_email(events: list[dict]) -> str:
 
 def send_framework_alert_emails(db_path: str, events: list[dict]) -> dict:
     """Envoie un email à tous les abonnés quand des changements de
-    référentiel ont été détectés. Best-effort : un échec d'envoi ne
-    doit jamais faire planter le check principal (même principe que
-    l'ancrage blockchain ailleurs dans ce projet).
+    référentiel ont été détectés, via l'API HTTP de Brevo (PAS SMTP).
 
-    Prérequis (variables d'environnement) :
-        SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, SENDER_EMAIL
-    Service recommandé : Brevo (gratuit jusqu'à 300 emails/jour).
+    ⚠️ Pourquoi HTTP et pas SMTP : Render bloque tout le trafic sortant
+    vers les ports SMTP (25, 465, 587) sur son tier gratuit depuis
+    septembre 2025 — confirmé en conditions réelles (SystemExit via
+    timeout de connexion smtplib). L'API HTTP de Brevo passe par le
+    port 443 (HTTPS), jamais bloqué par les hébergeurs cloud, car ça
+    reviendrait à bloquer le web entier.
 
-    ⚠️ Non testé avec un vrai envoi SMTP dans cet environnement de dev
-    (pas d'accès réseau SMTP sortant dans ce sandbox). La logique de
-    requête des abonnés et de formatage d'email a été testée avec de
-    vraies données PostgreSQL."""
+    Prérequis (variable d'environnement) : BREVO_API_KEY
+    (récupérable sur Brevo : Menu → SMTP & API → onglet "API Keys")
+
+    ✅ Testé : la construction de la requête et la gestion d'erreur ont
+    été vérifiées. Le vrai appel réseau à l'API Brevo n'a pas pu être
+    testé dans cet environnement de dev (pas de clé API disponible ici),
+    mais contrairement à SMTP, ce chemin HTTP n'est PAS bloqué par
+    Render — donc le blocage réseau qui empêchait SMTP ne s'applique pas ici."""
     if not events:
         return {"sent": 0, "reason": "Aucun changement à notifier."}
 
-    smtp_host = os.environ.get("SMTP_HOST")
-    if not smtp_host:
-        return {"sent": 0, "reason": "SMTP non configuré (SMTP_HOST manquant) — emails non envoyés."}
+    api_key = os.environ.get("BREVO_API_KEY")
+    if not api_key:
+        return {"sent": 0, "reason": "BREVO_API_KEY manquant — emails non envoyés."}
 
-    import smtplib
-    from email.mime.text import MIMEText
-
-    smtp_port = int(os.environ.get("SMTP_PORT", "587"))
-    smtp_user = os.environ.get("SMTP_USER")
-    smtp_password = os.environ.get("SMTP_PASSWORD")
-    sender_email = os.environ.get("SENDER_EMAIL", smtp_user)
+    sender_email = os.environ.get("SENDER_EMAIL")
+    if not sender_email:
+        return {"sent": 0, "reason": "SENDER_EMAIL manquant — emails non envoyés."}
 
     subscribers = get_subscriber_emails(db_path)
     if not subscribers:
@@ -279,23 +280,29 @@ def send_framework_alert_emails(db_path: str, events: list[dict]) -> dict:
     sent_count = 0
     errors = []
 
-    try:
-        with smtplib.SMTP(smtp_host, smtp_port) as server:
-            server.starttls()
-            server.login(smtp_user, smtp_password)
-
-            for email in subscribers:
-                try:
-                    msg = MIMEText(body)
-                    msg["Subject"] = "🔔 MCP Trust Score — Mise à jour de référentiel détectée"
-                    msg["From"] = sender_email
-                    msg["To"] = email
-                    server.send_message(msg)
-                    sent_count += 1
-                except Exception as e:
-                    errors.append(f"{email}: {e}")
-    except Exception as e:
-        return {"sent": sent_count, "reason": f"Échec de connexion SMTP : {e}", "errors": errors}
+    for email in subscribers:
+        try:
+            response = requests.post(
+                "https://api.brevo.com/v3/smtp/email",
+                headers={
+                    "api-key": api_key,
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                },
+                json={
+                    "sender": {"email": sender_email, "name": "MCP Trust Score"},
+                    "to": [{"email": email}],
+                    "subject": "🔔 MCP Trust Score — Mise à jour de référentiel détectée",
+                    "textContent": body,
+                },
+                timeout=15,
+            )
+            if response.status_code in (200, 201):
+                sent_count += 1
+            else:
+                errors.append(f"{email}: HTTP {response.status_code} — {response.text[:200]}")
+        except Exception as e:
+            errors.append(f"{email}: {e}")
 
     return {"sent": sent_count, "total_subscribers": len(subscribers), "errors": errors}
 
