@@ -641,30 +641,5 @@ def subscribe():
     return jsonify({"ok": True, "message": "Abonné aux alertes de mise à jour des référentiels."})
 
 
-@app.route("/admin/reset-framework-tables", methods=["POST"])
-def admin_reset_framework_tables():
-    """Route de maintenance TEMPORAIRE — supprime et recrée les tables
-    de veille des référentiels, nécessaire après un changement de schéma
-    (ajout des colonnes change_url/change_summary). Protégée par une
-    confirmation explicite pour éviter un déclenchement accidentel.
-
-    ⚠️ À RETIRER une fois utilisée — ce n'est pas fait pour rester en
-    production indéfiniment."""
-    payload = request.get_json() or {}
-    if payload.get("confirm") != "yes-reset-tables":
-        return jsonify({"error": "Confirmation requise : {'confirm': 'yes-reset-tables'}"}), 400
-
-    conn = get_db()
-    with conn:
-        conn.execute("DROP TABLE IF EXISTS framework_update_events")
-        conn.execute("DROP TABLE IF EXISTS framework_versions")
-        conn.execute("DROP TABLE IF EXISTS framework_subscribers")
-    conn.close()
-
-    framework_watch.init_framework_tables(DB_PATH)
-
-    return jsonify({"ok": True, "message": "Tables de veille des référentiels recréées avec le nouveau schéma."})
-
-
 if __name__ == "__main__":
     app.run(debug=True, port=5000)
