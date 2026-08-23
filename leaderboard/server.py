@@ -22,7 +22,7 @@ Prérequis : pip install flask
 import hashlib
 import json
 import os
-import sqlite3
+import db as db_layer
 from datetime import datetime, timedelta
 
 from flask import Flask, request, jsonify, render_template_string
@@ -40,46 +40,46 @@ GOLD_MIN_PERCENTAGE = 75.0
 TIER_ORDER = {"none": 0, "EMMA": 1, "Silver": 2}
 
 def get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+    return db_layer.get_db(DB_PATH)
 
 
 def init_db():
+    pk = db_layer.autoincrement_pk()
+    now = db_layer.now_expr()
     conn = get_db()
     with conn:
-        conn.execute("""
+        conn.execute(f"""
         CREATE TABLE IF NOT EXISTS submissions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id {pk},
             server_name TEXT NOT NULL,
             repo_url TEXT NOT NULL,
             nist_score REAL NOT NULL,
             axiom_score REAL NOT NULL,
             proof_hash TEXT,
-            submitted_at TEXT DEFAULT (datetime('now'))
+            submitted_at TEXT DEFAULT {now}
         )
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_repo_url ON submissions(repo_url)")
-        conn.execute("""
+        conn.execute(f"""
         CREATE TABLE IF NOT EXISTS org_audits (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id {pk},
             company_name TEXT NOT NULL,
             linked_repo_url TEXT,
             answers_json TEXT NOT NULL,
             percentage REAL NOT NULL,
             tier TEXT NOT NULL,
-            audited_at TEXT DEFAULT (datetime('now'))
+            audited_at TEXT DEFAULT {now}
         )
         """)
-        conn.execute("""
+        conn.execute(f"""
         CREATE TABLE IF NOT EXISTS anchored_badges (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id {pk},
             repo_url TEXT NOT NULL,
             tier TEXT NOT NULL,
             certification_hash TEXT NOT NULL UNIQUE,
             proof_path TEXT,
             anchor_status TEXT DEFAULT 'pending',
-            anchored_at TEXT DEFAULT (datetime('now'))
+            anchored_at TEXT DEFAULT {now}
         )
         """)
     conn.close()
@@ -117,7 +117,7 @@ def check_rate_limit(repo_url: str) -> bool:
     conn.close()
     if not row:
         return True
-    last_submitted = datetime.fromisoformat(row["submitted_at"])
+    last_submitted = badge_tier._parse_timestamp(row["submitted_at"])
     return datetime.now() - last_submitted > timedelta(minutes=RATE_LIMIT_MINUTES)
 
 
@@ -143,9 +143,9 @@ def submit():
 
     conn = get_db()
     with conn:
-        conn.execute("""
+        conn.execute(f"""
             INSERT INTO submissions (server_name, repo_url, nist_score, axiom_score, proof_hash, submitted_at)
-            VALUES (?, ?, ?, ?, ?, datetime('now'))
+            VALUES (?, ?, ?, ?, ?, {db_layer.now_expr()})
         """, (payload["server_name"], repo_url, payload["nist_score"],
               payload["axiom_score"], payload.get("proof_hash")))
     conn.close()
@@ -585,9 +585,9 @@ def submit_audit():
 
     conn = get_db()
     with conn:
-        conn.execute("""
+        conn.execute(f"""
             INSERT INTO org_audits (company_name, linked_repo_url, answers_json, percentage, tier, audited_at)
-            VALUES (?, ?, ?, ?, ?, datetime('now'))
+            VALUES (?, ?, ?, ?, ?, {db_layer.now_expr()})
         """, (company_name, linked_repo_url, json.dumps(scores), percentage, tier))
     conn.close()
 
@@ -634,7 +634,7 @@ def subscribe():
             conn.execute(
                 "INSERT INTO framework_subscribers (email) VALUES (?)", (email,)
             )
-    except sqlite3.IntegrityError:
+    except db_layer.IntegrityError:
         conn.close()
         return jsonify({"message": "Déjà abonné"}), 200
     conn.close()

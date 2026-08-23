@@ -26,47 +26,49 @@ MCP Trust Score pourrait être obsolète et mérite d'être relancé.
 import hashlib
 import json
 import os
-import sqlite3
 from datetime import datetime
 
 import requests
+
+import db as db_layer
 
 OWASP_REPO_API = "https://api.github.com/repos/OWASP/www-project-mcp-top-10/commits"
 NIST_AI_RMF_PAGE = "https://www.nist.gov/itl/ai-risk-management-framework"
 
 
 def init_framework_tables(db_path: str):
-    conn = sqlite3.connect(db_path)
+    pk = db_layer.autoincrement_pk()
+    now = db_layer.now_expr()
+    conn = db_layer.get_db(db_path)
     with conn:
-        conn.execute("""
+        conn.execute(f"""
         CREATE TABLE IF NOT EXISTS framework_versions (
             framework TEXT PRIMARY KEY,
             last_known_version TEXT,
-            last_checked_at TEXT DEFAULT (datetime('now'))
+            last_checked_at TEXT DEFAULT {now}
         )
         """)
-        conn.execute("""
+        conn.execute(f"""
         CREATE TABLE IF NOT EXISTS framework_update_events (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id {pk},
             framework TEXT NOT NULL,
             old_version TEXT,
             new_version TEXT,
-            detected_at TEXT DEFAULT (datetime('now'))
+            detected_at TEXT DEFAULT {now}
         )
         """)
-        conn.execute("""
+        conn.execute(f"""
         CREATE TABLE IF NOT EXISTS framework_subscribers (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id {pk},
             email TEXT NOT NULL UNIQUE,
-            subscribed_at TEXT DEFAULT (datetime('now'))
+            subscribed_at TEXT DEFAULT {now}
         )
         """)
     conn.close()
 
 
 def get_stored_version(db_path: str, framework: str) -> str | None:
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
+    conn = db_layer.get_db(db_path)
     row = conn.execute(
         "SELECT last_known_version FROM framework_versions WHERE framework = ?",
         (framework,)
@@ -76,20 +78,21 @@ def get_stored_version(db_path: str, framework: str) -> str | None:
 
 
 def set_stored_version(db_path: str, framework: str, version: str):
-    conn = sqlite3.connect(db_path)
+    now = db_layer.now_expr()
+    conn = db_layer.get_db(db_path)
     with conn:
-        conn.execute("""
+        conn.execute(f"""
             INSERT INTO framework_versions (framework, last_known_version, last_checked_at)
-            VALUES (?, ?, datetime('now'))
+            VALUES (?, ?, {now})
             ON CONFLICT(framework) DO UPDATE SET
                 last_known_version = excluded.last_known_version,
-                last_checked_at = datetime('now')
+                last_checked_at = {now}
         """, (framework, version))
     conn.close()
 
 
 def record_update_event(db_path: str, framework: str, old_version: str, new_version: str):
-    conn = sqlite3.connect(db_path)
+    conn = db_layer.get_db(db_path)
     with conn:
         conn.execute(
             "INSERT INTO framework_update_events (framework, old_version, new_version) VALUES (?,?,?)",

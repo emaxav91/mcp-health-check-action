@@ -68,3 +68,35 @@ chronologique (`ORDER BY submitted_at`) se casse silencieusement — les
 deux formats ne se trient pas correctement ensemble en comparaison de
 chaînes de caractères. Toujours utiliser `datetime('now')` côté SQL
 pour rester cohérent.
+
+## Migration vers PostgreSQL (résout le problème de base éphémère)
+
+✅ **Testée réellement** : un vrai serveur PostgreSQL 16 a été installé,
+démarré, et utilisé pour tester l'intégralité du pipeline (soumission,
+badges, audit, limite de fréquence, ancrage). Un vrai bug a été trouvé
+et corrigé en cours de route : PostgreSQL inclut le fuseau horaire dans
+ses timestamps, contrairement à SQLite, ce qui cassait la comparaison de
+dates — corrigé dans `badge_tier._parse_timestamp()`.
+
+### Créer la base PostgreSQL sur Render
+
+1. Sur Render, "New +" → "PostgreSQL"
+2. Nom : `mcp-trust-score-db`, plan **Free**
+3. Une fois créée, copie l'**"Internal Database URL"** (pas l'externe —
+   l'interne est plus rapide et gratuite pour la communication entre
+   services Render)
+
+### Connecter le service web à cette base
+
+1. Va sur ton service `mcp-trust-score` → Environment Variables
+2. Ajoute `DATABASE_URL` avec la valeur copiée à l'étape précédente
+3. Sauvegarde — Render redéploie automatiquement
+
+Le code bascule **automatiquement** sur PostgreSQL dès que cette
+variable est présente — aucun autre changement nécessaire. Sans elle,
+le code continue de fonctionner en SQLite (utile pour tester en local).
+
+⚠️ **Limite du tier gratuit PostgreSQL Render** : expire après 90 jours
+d'inactivité du compte de facturation (vérifie les conditions actuelles
+sur render.com au moment de la mise en prod) — suffisant pour valider
+le produit, mais prévoir un plan payant avant un usage long terme sérieux.

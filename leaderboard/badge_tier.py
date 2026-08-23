@@ -22,7 +22,7 @@ Critères :
   vérifications rapprochées pour gonfler artificiellement le palier.
 """
 
-import sqlite3
+import db as db_layer
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -31,6 +31,20 @@ SILVER_MIN_AXIOM_SCORE = 80.0
 SILVER_MIN_SUBMISSIONS = 3
 SILVER_MIN_SPAN_DAYS = 14
 SILVER_WINDOW_DAYS = 30
+
+
+def _parse_timestamp(raw: str) -> datetime:
+    """Parse un timestamp venant soit de SQLite (naïf, sans fuseau) soit
+    de PostgreSQL (avec fuseau, ex: '...+00') — normalise en retirant le
+    fuseau, pour permettre des comparaisons cohérentes entre les deux
+    backends sans erreur 'naive vs aware'.
+
+    ⚠️ Bug réel trouvé et corrigé lors des tests de migration PostgreSQL :
+    comparer un datetime avec fuseau à un datetime sans fuseau lève une
+    TypeError — découvert en testant contre un vrai serveur PostgreSQL,
+    pas en théorie."""
+    dt = datetime.fromisoformat(raw)
+    return dt.replace(tzinfo=None) if dt.tzinfo else dt
 
 
 @dataclass
@@ -44,14 +58,13 @@ class BadgeResult:
 def get_submission_history(db_path: str, repo_url: str) -> list[dict]:
     """Récupère l'historique complet des soumissions pour un repo,
     triées de la plus récente à la plus ancienne."""
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
+    conn = db_layer.get_db(db_path)
     rows = conn.execute(
         "SELECT * FROM submissions WHERE repo_url = ? ORDER BY submitted_at DESC",
         (repo_url,)
     ).fetchall()
     conn.close()
-    return [dict(r) for r in rows]
+    return [dict(r) if not hasattr(r, "_data") else r._data for r in rows]
 
 
 def compute_badge_tier(history: list[dict]) -> BadgeResult:
@@ -76,7 +89,7 @@ def compute_badge_tier(history: list[dict]) -> BadgeResult:
     cutoff = datetime.now() - timedelta(days=SILVER_WINDOW_DAYS)
     qualifying = [
         h for h in history
-        if datetime.fromisoformat(h["submitted_at"]) > cutoff
+        if _parse_timestamp(h["submitted_at"]) > cutoff
         and h["axiom_score"] >= SILVER_MIN_AXIOM_SCORE
     ]
 
@@ -88,7 +101,7 @@ def compute_badge_tier(history: list[dict]) -> BadgeResult:
             f"à ≥{SILVER_MIN_AXIOM_SCORE}% requises pour Silver."
         )
 
-    timestamps = sorted(datetime.fromisoformat(h["submitted_at"]) for h in qualifying)
+    timestamps = sorted(_parse_timestamp(h["submitted_at"]) for h in qualifying)
     span_days = (timestamps[-1] - timestamps[0]).days
 
     if span_days < SILVER_MIN_SPAN_DAYS:
