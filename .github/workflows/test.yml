@@ -1,0 +1,22 @@
+name: MCP Trust Score
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  mcp-trust-score:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Vérifier la conformité MCP
+        uses: ./
+        with:
+          server-command: 'python3 test_server.py'
+          min-score: '70'
